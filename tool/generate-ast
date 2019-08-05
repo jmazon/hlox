@@ -1,0 +1,44 @@
+#! /usr/bin/env perl
+
+use 5.020;
+use warnings;
+use autodie;
+
+@ARGV == 1 or
+  die "Usage: generate-ast <output directory>\n";
+my $output_dir = shift;
+
+sub define_ast {
+  my ($output_dir,$basename,@types) = @_;
+  my $path = "$output_dir/$basename.hs";
+  open my $writer, '>', $path;
+  say $writer 'module Expr where';
+  say $writer 'import Token (Token,Literal)';
+
+  my @subtypes;
+  foreach my $type (@types) {
+    my ($classname,$fields) = $type =~ /^ *(\w+) *: *(.*?) *$/;
+    push @subtypes, define_type( $writer, $basename, $classname, $fields );
+  }
+  say $writer "data $basename = ", join( ' | ', @subtypes ), " deriving Show";
+}
+
+sub define_type {
+  my ($writer,$basename,$classname,$fields) = @_;
+
+  my @fields = split ', ', $fields;
+  my @hsfields;
+  for my $field (@fields) {
+    my ($type,$name) = split ' ', $field;
+    push @hsfields, "\L$classname\E\u\L$name\E :: $type";
+  }
+
+  "$classname { " . join( ', ', @hsfields ) . " }";
+}
+
+define_ast( $output_dir, 'Expr',
+            'Binary   : Expr left, Token operator, Expr right',
+            'Grouping : Expr expression',
+            'Literal  : Literal value',
+            'Unary    : Token operator, Expr right'
+          );

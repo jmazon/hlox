@@ -4,6 +4,8 @@ import System.Exit
 
 import Globals
 import Scanner
+import Parser
+import AstPrinter
 
 main :: IO ()
 main = do
@@ -29,9 +31,17 @@ runPrompt = forever $ do
   run =<< getLine
   writeGlobal hadError False
 
-run :: String -> IO ()
-run source = do
+run,runLex,runParse :: String -> IO ()
+run = runParse
+runLex source = do
   scanner <- newScanner source
   tokens <- scanTokens scanner
-
   mapM_ print tokens
+runParse source = do
+  scanner <- newScanner source
+  tokens <- scanTokens scanner
+  parser <- newParser tokens
+  expr <- parse parser
+  he <- readGlobal hadError
+  unless he $ do
+    putStrLn $ printAst expr

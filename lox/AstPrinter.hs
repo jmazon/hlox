@@ -1,4 +1,4 @@
-module AstPrinter where
+module AstPrinter (printAst) where
 
 import Expr
 import Token

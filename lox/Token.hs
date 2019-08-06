@@ -12,8 +12,9 @@ data Token = Token {
 instance Show Token where
   show (Token t lex lit _) = show t ++ " " ++ lex ++ " " ++ show lit
 
-data Literal = LNull | LString String | LNumber Double
+data Literal = LNull | LString String | LNumber Double | LBool Bool
 instance Show Literal where
   show LNull = "(null)"
   show (LString s) = s
   show (LNumber n) = show n
+  show (LBool tf) = show tf

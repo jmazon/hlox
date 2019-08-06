@@ -20,4 +20,4 @@ data TokenType =
 
   | Eof
 
-  deriving Show
+  deriving (Show,Eq)

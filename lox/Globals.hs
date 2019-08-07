@@ -9,3 +9,4 @@ writeGlobal (Global g) = writeIORef g
 newtype Global a = Global (IORef a)
 
 hadError = Global $ unsafePerformIO $ newIORef False
+hadRuntimeError = Global $ unsafePerformIO $ newIORef False

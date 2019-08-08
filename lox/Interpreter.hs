@@ -1,6 +1,8 @@
 module Interpreter where
 
+import Data.Char
 import Data.List
+import Control.Monad
 import Control.Exception hiding (evaluate)
 
 import qualified TokenType as TT
@@ -8,32 +10,41 @@ import Token
 import Expr
 import RuntimeError
 import Misc
+import Stmt
+import Value
+import Environment
 
-data Interpreter = Interpreter
+data Interpreter = Interpreter { interpreterEnvironment :: Environment }
 
 newInterpreter :: IO Interpreter
-newInterpreter = return Interpreter
+newInterpreter = Interpreter <$> newEnvironment
 
-interpret :: Interpreter -> Expr -> IO ()
-interpret _ expr = do
-  (evaluate expr >>= putStrLn . stringify) `catch`
+interpret :: Interpreter -> [Stmt] -> IO ()
+interpret i statements = do
+  (mapM_ (execute i) statements) `catch`
     (\e -> runtimeError (e :: RuntimeError))
 
-data Value = VNull | VNumber Double | VBool Bool | VString String deriving Eq
-
-evaluate (Literal (LNumber n)) = return (VNumber n)
-evaluate (Grouping expr) = evaluate expr
-evaluate (Unary operator right) = do
-  r <- evaluate right
+evaluate :: Interpreter -> Expr -> IO Value
+evaluate _ (Literal (LNumber n)) = return (VNumber n)
+evaluate _ (Literal (LBool b)) = return (VBool b)
+evaluate _ (Literal (LString s)) = return (VString s)
+evaluate i (Grouping expr) = evaluate i expr
+evaluate i (Unary operator right) = do
+  r <- evaluate i right
   case tokenType operator of
     TT.Bang -> return (VBool (not (isTruthy r)))
     TT.Minus -> checkNumberOperand operator r >>
                 let (VNumber n) = r
                 in return (VNumber (-n))
     _ -> return VNull
-evaluate (Binary left operator right) = do
-  l <- evaluate left
-  r <- evaluate right
+evaluate i (Variable name) = get (interpreterEnvironment i) name
+evaluate i (Assign name value) = do
+  v <- evaluate i value
+  assign (interpreterEnvironment i) name v
+  return v
+evaluate i (Binary left operator right) = do
+  l <- evaluate i left
+  r <- evaluate i right
   case tokenType operator of
     TT.Greater -> checkNumberOperands operator l r >>
                   let (VNumber vl) = l; (VNumber vr) = r
@@ -65,6 +76,18 @@ evaluate (Binary left operator right) = do
                in return (VNumber (vl * vr))
     _ -> return VNull
 
+execute :: Interpreter -> Stmt -> IO ()
+execute i (Expression expr) = void $ evaluate i expr
+execute i (Print value) = do
+  v <- evaluate i value
+  putStrLn (stringify v)
+execute i (Var name initializer) = do
+  value <- maybe (return VNull) (evaluate i) initializer
+  define (interpreterEnvironment i) (tokenLexeme name) value
+execute i (Block statements) = do
+  environment <- childEnvironment (interpreterEnvironment i)
+  forM_ statements $ execute i { interpreterEnvironment = environment }
+
 checkNumberOperand :: Token -> Value -> IO ()
 checkNumberOperand operator operand
   | VNumber _ <- operand = return ()
@@ -81,7 +104,9 @@ isTruthy _ = True
 
 stringify :: Value -> String
 stringify VNull = "nil"
+stringify (VBool b) = map toLower (show b)
 stringify (VNumber n) | ".0" `isSuffixOf` s = init (init s)
                       | otherwise = s
   where s = show n
-stringify _ = error $ "stringify not fully implemented."
+stringify (VString s) = s
+

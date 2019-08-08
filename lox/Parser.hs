@@ -1,5 +1,6 @@
 module Parser where
 
+import Data.Maybe
 import Data.IORef
 import Control.Monad
 import Control.Monad.Loops
@@ -11,6 +12,7 @@ import qualified TokenType as TT
 import TokenType (TokenType)
 import Token
 import Expr
+import Stmt
 
 data Parser = Parser {
     parserTokens :: [Token]
@@ -21,12 +23,65 @@ newParser :: [Token] -> IO Parser
 newParser tokens = do
   Parser tokens <$> newIORef 0
 
-parse :: Parser -> IO Expr
+parse :: Parser -> IO [Stmt]
 parse p = do
-  expression p `catch` (\ParseError -> error "null")
+  fmap catMaybes $ whileM (not <$> isAtEnd p) $ declaration p
 
 expression :: Parser -> IO Expr
-expression = equality
+expression = assignment
+
+declaration :: Parser -> IO (Maybe Stmt)
+declaration p = do
+  handle (\ParseError -> synchronize p >> return Nothing) $ do
+    v <- match p [TT.Var]
+    Just <$> if v then varDeclaration p else statement p
+
+statement :: Parser -> IO Stmt
+statement p = caseM
+  [ (match p [TT.Print],printStatement p)
+  , (match p [TT.LeftBrace],Block <$> block p)
+  ]
+  (expressionStatement p)
+  
+printStatement :: Parser -> IO Stmt
+printStatement p = do
+  value <- expression p
+  consume p TT.Semicolon "Expect ';' after value."
+  return (Print value)
+
+varDeclaration :: Parser -> IO Stmt
+varDeclaration p = do
+  name <- consume p TT.Identifier "Expect variable name."
+  eq <- match p [TT.Equal]
+  initializer <- if eq then Just <$> expression p else return Nothing
+  consume p TT.Semicolon "Expect ';' after variable declaration."
+  return (Var name initializer)
+  
+expressionStatement :: Parser -> IO Stmt
+expressionStatement p = do
+  expr <- expression p
+  consume p TT.Semicolon "Expect ';' after expression."
+  return (Expression expr)
+
+block :: Parser -> IO [Stmt]
+block p = do
+  statements <- fmap catMaybes $
+                whileM (andM [not <$> check p TT.RightBrace,not <$> isAtEnd p])
+                  (declaration p)
+  consume p TT.RightBrace "Expect '}' after block."
+  return statements
+
+assignment :: Parser -> IO Expr
+assignment p = do
+  expr <- equality p
+  eq <- match p [TT.Equal]
+  if eq then do
+      equals <- previous p
+      value <- assignment p
+      case expr of Variable name -> return (Assign name value)
+                   _ -> parseError equals "Invalid assignment target."
+                        >> return (Literal LNull)
+    else return expr
 
 equality :: Parser -> IO Expr
 equality p = leftAssoc p [TT.BangEqual,TT.EqualEqual] comparison
@@ -57,6 +112,7 @@ primary p = caseM
   , (match p [TT.Nil],return (Literal (LNull)))
   , (match p [TT.Number],Literal . tokenLiteral <$> previous p)
   , (match p [TT.String],Literal . tokenLiteral <$> previous p)
+  , (match p [TT.Identifier],Variable <$> previous p)
   , (match p [TT.LeftParen],do
         expr <- expression p
         consume p TT.RightParen "Expect ')' after expression."
@@ -84,10 +140,11 @@ match p = anyM f where
            when c $ void $ advance p
            return c
 
-consume :: Parser -> TokenType -> String -> IO ()
+consume :: Parser -> TokenType -> String -> IO Token
 consume p tt msg = do
   c <- check p tt
   if c then void (advance p) else throwIO =<< flip parseError msg =<< peek p
+  previous p
 
 check :: Parser -> TokenType -> IO Bool
 check p tt = do

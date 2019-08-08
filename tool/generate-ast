@@ -12,8 +12,9 @@ sub define_ast {
   my ($output_dir,$basename,@types) = @_;
   my $path = "$output_dir/$basename.hs";
   open my $writer, '>', $path;
-  say $writer 'module Expr where';
+  say $writer "module $basename where";
   say $writer 'import Token (Token,Literal)';
+  say $writer 'import Expr' if $basename ne 'Expr';
 
   my @subtypes;
   foreach my $type (@types) {
@@ -30,6 +31,8 @@ sub define_type {
   my @hsfields;
   for my $field (@fields) {
     my ($type,$name) = split ' ', $field;
+    if ( $name =~ s/\?$// ) { $type = "Maybe $type" }
+    if ( $name =~ s/\*$// ) { $type = "[$type]" }
     push @hsfields, "\L$classname\E\u\L$name\E :: $type";
   }
 
@@ -37,8 +40,16 @@ sub define_type {
 }
 
 define_ast( $output_dir, 'Expr',
+            'Assign   : Token name, Expr value',
             'Binary   : Expr left, Token operator, Expr right',
             'Grouping : Expr expression',
             'Literal  : Literal value',
-            'Unary    : Token operator, Expr right'
+            'Unary    : Token operator, Expr right',
+            'Variable : Token name',
+          );
+define_ast( $output_dir, 'Stmt',
+            'Block      : Stmt statements*',
+            'Expression : Expr expression',
+            'Print      : Expr expression',
+            'Var        : Token name, Expr initializer?',
           );

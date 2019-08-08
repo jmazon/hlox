@@ -35,25 +35,11 @@ runPrompt interpreter = forever $ do
   run interpreter =<< getLine
   writeGlobal hadError False
 
-runLex,runParse :: String -> IO ()
-runLex source = do
-  scanner <- newScanner source
-  tokens <- scanTokens scanner
-  mapM_ print tokens
-runParse source = do
-  scanner <- newScanner source
-  tokens <- scanTokens scanner
-  parser <- newParser tokens
-  expr <- parse parser
-  he <- readGlobal hadError
-  unless he $ do
-    putStrLn $ printAst expr
-
 run :: Interpreter -> String -> IO ()
 run interpreter source = do
   scanner <- newScanner source
   tokens <- scanTokens scanner
   parser <- newParser tokens
-  expr <- parse parser
+  statements <- parse parser
   he <- readGlobal hadError
-  unless he $ interpret interpreter expr
+  unless he $ interpret interpreter statements

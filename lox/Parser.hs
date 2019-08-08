@@ -64,7 +64,7 @@ forStatement p = do
   let body' = maybe body (\i -> Block [body,Expression i]) increment
       condition' = fromMaybe (Literal $ LBool True) condition
       body'' = While condition' body'
-      body''' = maybe body'' (Block . (: [body])) initializer
+      body''' = maybe body'' (Block . (: [body''])) initializer
 
   return body'''
   

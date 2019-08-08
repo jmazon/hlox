@@ -3,6 +3,7 @@ module Interpreter where
 import Data.Char
 import Data.List
 import Control.Monad
+import Control.Monad.Loops
 import Control.Exception hiding (evaluate)
 
 import qualified TokenType as TT
@@ -25,9 +26,16 @@ interpret i statements = do
     (\e -> runtimeError (e :: RuntimeError))
 
 evaluate :: Interpreter -> Expr -> IO Value
+evaluate _ (Literal LNull) = return VNull
 evaluate _ (Literal (LNumber n)) = return (VNumber n)
 evaluate _ (Literal (LBool b)) = return (VBool b)
 evaluate _ (Literal (LString s)) = return (VString s)
+evaluate i (Logical left operator right) = do
+  l <- evaluate i left
+  case (tokenType operator,isTruthy l) of
+    (TT.Or,True) -> return l
+    (TT.And,False) -> return l
+    _ -> evaluate i right
 evaluate i (Grouping expr) = evaluate i expr
 evaluate i (Unary operator right) = do
   r <- evaluate i right
@@ -78,12 +86,19 @@ evaluate i (Binary left operator right) = do
 
 execute :: Interpreter -> Stmt -> IO ()
 execute i (Expression expr) = void $ evaluate i expr
+execute i (If condition thenBranch elseBranch) = do
+  c <- isTruthy <$> evaluate i condition
+  if c then execute i thenBranch
+    else maybe (pure ()) (execute i) elseBranch
 execute i (Print value) = do
   v <- evaluate i value
   putStrLn (stringify v)
 execute i (Var name initializer) = do
   value <- maybe (return VNull) (evaluate i) initializer
   define (interpreterEnvironment i) (tokenLexeme name) value
+execute i (While condition body) = do
+  whileM_ (isTruthy <$> evaluate i condition)
+    (execute i body)
 execute i (Block statements) = do
   environment <- childEnvironment (interpreterEnvironment i)
   forM_ statements $ execute i { interpreterEnvironment = environment }

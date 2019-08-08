@@ -1,5 +1,6 @@
 module Parser where
 
+import Prelude hiding (or,and)
 import Data.Maybe
 import Data.IORef
 import Control.Monad
@@ -38,10 +39,46 @@ declaration p = do
 
 statement :: Parser -> IO Stmt
 statement p = caseM
-  [ (match p [TT.Print],printStatement p)
+  [ (match p [TT.For],forStatement p)
+  , (match p [TT.If],ifStatement p)
+  , (match p [TT.Print],printStatement p)
+  , (match p [TT.While],whileStatement p)
   , (match p [TT.LeftBrace],Block <$> block p)
   ]
   (expressionStatement p)
+
+forStatement :: Parser -> IO Stmt
+forStatement p = do
+  consume p TT.LeftParen "Expect '(' after 'for'."
+  initializer <- ifM (match p [TT.Semicolon]) (return Nothing) $
+                 ifM (match p [TT.Var]) (Just <$> varDeclaration p) $
+                 Just <$> expressionStatement p
+  condition <- ifM (not <$> check p TT.Semicolon) (Just <$> expression p)
+                                                  (return Nothing)
+  consume p TT.Semicolon "Expect ';' after loop confition."
+  increment <- ifM (not <$> check p TT.RightParen) (Just <$> expression p)
+                                                   (return Nothing)
+  consume p TT.RightParen "Expect ')' after for clauses."
+  body <- statement p
+
+  let body' = maybe body (\i -> Block [body,Expression i]) increment
+      condition' = fromMaybe (Literal $ LBool True) condition
+      body'' = While condition' body'
+      body''' = maybe body'' (Block . (: [body])) initializer
+
+  return body'''
+  
+ifStatement :: Parser -> IO Stmt
+ifStatement p = do
+  consume p TT.LeftParen "Expect '(' after 'if'."
+  condition <- expression p
+  consume p TT.RightParen "Expect ')' after if condition."
+
+  thenBranch <- statement p
+  e <- match p [TT.Else]
+  elseBranch <- if e then Just <$> statement p else return Nothing
+
+  return (If condition thenBranch elseBranch)
   
 printStatement :: Parser -> IO Stmt
 printStatement p = do
@@ -56,6 +93,14 @@ varDeclaration p = do
   initializer <- if eq then Just <$> expression p else return Nothing
   consume p TT.Semicolon "Expect ';' after variable declaration."
   return (Var name initializer)
+
+whileStatement :: Parser -> IO Stmt
+whileStatement p = do
+  consume p TT.LeftParen "Expect '(' after 'while'."
+  condition <- expression p
+  consume p TT.RightParen "Expect ')' after condition."
+  body <- statement p
+  return (While condition body)
   
 expressionStatement :: Parser -> IO Stmt
 expressionStatement p = do
@@ -73,7 +118,7 @@ block p = do
 
 assignment :: Parser -> IO Expr
 assignment p = do
-  expr <- equality p
+  expr <- or p
   eq <- match p [TT.Equal]
   if eq then do
       equals <- previous p
@@ -83,18 +128,22 @@ assignment p = do
                         >> return (Literal LNull)
     else return expr
 
+or,and :: Parser -> IO Expr
+or p = leftAssoc p [TT.Or] Logical and
+and p = leftAssoc p [TT.And] Logical equality
+
 equality :: Parser -> IO Expr
-equality p = leftAssoc p [TT.BangEqual,TT.EqualEqual] comparison
+equality p = binary p [TT.BangEqual,TT.EqualEqual] comparison
 
 comparison :: Parser -> IO Expr
-comparison p = leftAssoc p [TT.Greater,TT.GreaterEqual,TT.Less,TT.LessEqual]
-                           addition
+comparison p = binary p [TT.Greater,TT.GreaterEqual,TT.Less,TT.LessEqual]
+                        addition
 
 addition :: Parser -> IO Expr
-addition p = leftAssoc p [TT.Minus,TT.Plus] multiplication
+addition p = binary p [TT.Minus,TT.Plus] multiplication
 
 multiplication :: Parser -> IO Expr
-multiplication p = leftAssoc p [TT.Slash,TT.Star] unary
+multiplication p = binary p [TT.Slash,TT.Star] unary
 
 unary :: Parser -> IO Expr
 unary p = do
@@ -125,10 +174,13 @@ caseM cs def = go cs where
                      if p then b else go cs
   go [] = def
   
-leftAssoc :: Parser -> [TokenType] -> (Parser -> IO Expr) -> IO Expr
-leftAssoc p tokens next = do
+binary :: Parser -> [TokenType] -> (Parser -> IO Expr) -> IO Expr
+binary p tokens next = leftAssoc p tokens Binary next
+
+leftAssoc :: Parser -> [TokenType] -> (Expr -> Token -> Expr -> Expr) -> (Parser -> IO Expr) -> IO Expr
+leftAssoc p tokens node next = do
   expr <- next p
-  fmap (foldl (\l (o,r) -> Binary l o r) expr) $
+  fmap (foldl (\l (o,r) -> node l o r) expr) $
     whileM (match p tokens) $ do
       operator <- previous p
       right <- next p
@@ -185,3 +237,6 @@ synchronize p = do
                              ,TT.If,TT.While,TT.Print,TT.Return]) . tokenType
                   <$> peek p ] ) $
     advance p
+
+ifM :: Monad m => m Bool -> m a -> m a -> m a
+ifM c t e = do c >>= \p -> if p then t else e

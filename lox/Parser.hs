@@ -4,6 +4,7 @@ import Prelude hiding (or,and)
 import Data.Maybe
 import Data.IORef
 import Control.Monad
+import Control.Monad.Cont
 import Control.Monad.Loops
 import Control.Exception
 
@@ -33,15 +34,17 @@ expression = assignment
 
 declaration :: Parser -> IO (Maybe Stmt)
 declaration p = do
-  handle (\ParseError -> synchronize p >> return Nothing) $ do
-    v <- match p [TT.Var]
-    Just <$> if v then varDeclaration p else statement p
+  handle (\ParseError -> synchronize p >> return Nothing) $ Just <$> caseM
+    [ (match p [TT.Fun],function p "function")
+    , (match p [TT.Var],varDeclaration p) ]
+    (statement p)
 
 statement :: Parser -> IO Stmt
 statement p = caseM
   [ (match p [TT.For],forStatement p)
   , (match p [TT.If],ifStatement p)
   , (match p [TT.Print],printStatement p)
+  , (match p [TT.Return],returnStatement p)
   , (match p [TT.While],whileStatement p)
   , (match p [TT.LeftBrace],Block <$> block p)
   ]
@@ -86,6 +89,13 @@ printStatement p = do
   consume p TT.Semicolon "Expect ';' after value."
   return (Print value)
 
+returnStatement :: Parser -> IO Stmt
+returnStatement p = do
+  keyword <- previous p
+  value <- ifM (not <$> check p TT.Semicolon) (Just <$> expression p) (return Nothing)
+  consume p TT.Semicolon "Expecct ';' after return value."
+  return (Return keyword value)
+
 varDeclaration :: Parser -> IO Stmt
 varDeclaration p = do
   name <- consume p TT.Identifier "Expect variable name."
@@ -107,6 +117,25 @@ expressionStatement p = do
   expr <- expression p
   consume p TT.Semicolon "Expect ';' after expression."
   return (Expression expr)
+
+function :: Parser -> String -> IO Stmt
+function p kind = do
+  name <- consume p TT.Identifier $ "Expect " ++ kind ++ " name."
+  consume p TT.LeftParen $ "Expect '(' after " ++ kind ++ " name."
+
+  let f i = do
+        when (i == 255) $ void $ flip parseError "Cannot have more than 255 parameters." =<< peek p
+        ifM (match p [TT.Comma]) (Just . flip (,) (i+1) <$> c)
+                                 (return Nothing)
+      c = consume p TT.Identifier "Expect parameter name."
+  parameters <- ifM (not <$> check p TT.RightParen)
+                  (liftM2 (:) c (unfoldrM f 1)) (return [])
+
+  consume p TT.RightParen "Expect ')' after parameters."
+
+  consume p TT.LeftBrace $ "Expect '{' before " ++ kind ++ " body."
+  body <- block p
+  return (Function name parameters body)
 
 block :: Parser -> IO [Stmt]
 block p = do
@@ -152,7 +181,28 @@ unary p = do
     operator <- previous p
     right <- unary p
     return $ Unary operator right
-    else primary p
+    else call p
+
+finishCall :: Parser -> Expr -> IO Expr
+finishCall p callee = do
+  let f i = do
+        when (i == 255) $ void $ flip parseError "Cannot have more than 255 arguments." =<< peek p
+        ifM (match p [TT.Comma]) (Just . flip (,) (i+1) <$> expression p)
+                                 (return Nothing)
+  arguments <- ifM (not <$> check p TT.RightParen)
+                 (liftM2 (:) (expression p) (unfoldrM f 1))
+                 (return [])
+  paren <- consume p TT.RightParen "Expect ')' after arguments."
+  return (Call callee paren arguments)
+
+call :: Parser -> IO Expr
+call p = flip runContT readIORef $ do
+  expr <- lift (newIORef =<< primary p)
+  callCC $ \exit -> forever $ do
+    ifM (lift $ match p [TT.LeftParen])
+        (lift $ writeIORef expr =<< finishCall p =<< readIORef expr)
+      (exit ())
+  return expr
 
 primary :: Parser -> IO Expr
 primary p = caseM

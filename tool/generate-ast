@@ -12,8 +12,10 @@ sub define_ast {
   my ($output_dir,$basename,@types) = @_;
   my $path = "$output_dir/$basename.hs";
   open my $writer, '>', $path;
+  say $writer '{-# LANGUAGE DeriveGeneric #-}';
   say $writer "module $basename where";
-  say $writer 'import Token (Token,Literal)';
+  say $writer 'import GHC.Generics (Generic)';
+  say $writer 'import Token (Token,Literal,Unique\')';
   say $writer 'import Expr' if $basename ne 'Expr';
 
   my @subtypes;
@@ -21,7 +23,7 @@ sub define_ast {
     my ($classname,$fields) = $type =~ /^ *(\w+) *: *(.*?) *$/;
     push @subtypes, define_type( $writer, $basename, $classname, $fields );
   }
-  say $writer "data $basename = ", join( ' | ', @subtypes ), " deriving Show";
+  say $writer "data $basename = ", join( ' | ', @subtypes ), " deriving (Show,Eq,Generic)";
 }
 
 sub define_type {
@@ -40,14 +42,14 @@ sub define_type {
 }
 
 define_ast( $output_dir, 'Expr',
-            'Assign   : Token name, Expr value',
+            'Assign   : Token name, Unique\' id, Expr value',
             'Binary   : Expr left, Token operator, Expr right',
             'Call     : Expr callee, Token paren, Expr arguments*',
             'Grouping : Expr expression',
             'Literal  : Literal value',
             'Logical  : Expr left, Token operator, Expr right',
             'Unary    : Token operator, Expr right',
-            'Variable : Token name',
+            'Variable : Token name, Unique\' id',
           );
 define_ast( $output_dir, 'Stmt',
             'Block      : Stmt statements*',

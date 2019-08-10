@@ -1,5 +1,6 @@
 module Environment where
 
+import Data.Maybe
 import Data.IORef
 import qualified Data.HashMap.Strict as H
 import Control.Exception
@@ -38,3 +39,14 @@ assign e name value = do
 
 define :: Environment -> String -> Value -> IO ()
 define e name value = modifyIORef (environmentValues e) (H.insert name value)
+
+ancestor :: Environment -> Int -> Environment
+ancestor e 0 = e
+ancestor e i = ancestor (fromJust $ environmentEnclosing e) (i-1)
+
+getAt :: Environment -> Int -> String -> IO Value
+getAt e d name = fmap (H.! name) $ readIORef $ environmentValues $ ancestor e d
+
+assignAt :: Environment -> Int -> Token -> Value -> IO ()
+assignAt e d name value =
+  modifyIORef (environmentValues (ancestor e d)) (H.insert (tokenLexeme name) value)

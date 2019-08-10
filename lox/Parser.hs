@@ -3,6 +3,7 @@ module Parser where
 import Prelude hiding (or,and)
 import Data.Maybe
 import Data.IORef
+import Data.Unique
 import Control.Monad
 import Control.Monad.Cont
 import Control.Monad.Loops
@@ -124,7 +125,7 @@ function p kind = do
   consume p TT.LeftParen $ "Expect '(' after " ++ kind ++ " name."
 
   let f i = do
-        when (i == 255) $ void $ flip parseError "Cannot have more than 255 parameters." =<< peek p
+        when (i == 255) $ void $ flip tokenError "Cannot have more than 255 parameters." =<< peek p
         ifM (match p [TT.Comma]) (Just . flip (,) (i+1) <$> c)
                                  (return Nothing)
       c = consume p TT.Identifier "Expect parameter name."
@@ -152,8 +153,10 @@ assignment p = do
   if eq then do
       equals <- previous p
       value <- assignment p
-      case expr of Variable name -> return (Assign name value)
-                   _ -> parseError equals "Invalid assignment target."
+      case expr of Variable name _ -> do
+                     u <- newUnique
+                     return (Assign name (Unique' u) value)
+                   _ -> tokenError equals "Invalid assignment target."
                         >> return (Literal LNull)
     else return expr
 
@@ -186,7 +189,7 @@ unary p = do
 finishCall :: Parser -> Expr -> IO Expr
 finishCall p callee = do
   let f i = do
-        when (i == 255) $ void $ flip parseError "Cannot have more than 255 arguments." =<< peek p
+        when (i == 255) $ void $ flip tokenError "Cannot have more than 255 arguments." =<< peek p
         ifM (match p [TT.Comma]) (Just . flip (,) (i+1) <$> expression p)
                                  (return Nothing)
   arguments <- ifM (not <$> check p TT.RightParen)
@@ -211,12 +214,12 @@ primary p = caseM
   , (match p [TT.Nil],return (Literal (LNull)))
   , (match p [TT.Number],Literal . tokenLiteral <$> previous p)
   , (match p [TT.String],Literal . tokenLiteral <$> previous p)
-  , (match p [TT.Identifier],Variable <$> previous p)
+  , (match p [TT.Identifier],liftM2 Variable (previous p) (Unique' <$> newUnique))
   , (match p [TT.LeftParen],do
         expr <- expression p
         consume p TT.RightParen "Expect ')' after expression."
         return (Grouping expr)) ]
-  (throwIO =<< flip parseError "Expect expression." =<< peek p)
+  (throwIO =<< flip tokenError "Expect expression." =<< peek p)
 
 caseM :: Monad m => [(m Bool,m a)] -> m a -> m a
 caseM cs def = go cs where
@@ -245,7 +248,7 @@ match p = anyM f where
 consume :: Parser -> TokenType -> String -> IO Token
 consume p tt msg = do
   c <- check p tt
-  if c then void (advance p) else throwIO =<< flip parseError msg =<< peek p
+  if c then void (advance p) else throwIO =<< flip tokenError msg =<< peek p
   previous p
 
 check :: Parser -> TokenType -> IO Bool
@@ -267,16 +270,6 @@ peek p = (parserTokens p !!) <$> readIORef (parserCurrent p)
 
 previous :: Parser -> IO Token
 previous p = (parserTokens p !!) . pred <$> readIORef (parserCurrent p)
-
-data ParseError = ParseError deriving Show
-instance Exception ParseError
-
-parseError :: Token -> String -> IO ParseError
-parseError t m = do
-  if tokenType t == TT.Eof
-    then report (tokenLine t) " at end" m
-    else report (tokenLine t) (" at '" ++ tokenLexeme t ++ "'") m
-  return ParseError
 
 synchronize :: Parser -> IO ()
 synchronize p = do

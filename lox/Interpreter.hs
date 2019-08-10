@@ -1,9 +1,13 @@
-{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE ExistentialQuantification,DeriveGeneric #-}
 
 module Interpreter where
 
 import Data.Char
 import Data.List
+import qualified Data.HashMap.Strict as H
+import Data.HashMap.Strict (HashMap)
+import Data.Hashable
+import Data.IORef
 import Control.Monad
 import Control.Monad.Loops
 import Control.Exception hiding (evaluate)
@@ -19,7 +23,8 @@ import Stmt
 import Value
 import Environment
 
-data Interpreter = Interpreter { interpreterEnvironment :: Environment }
+data Interpreter = Interpreter { interpreterEnvironment :: Environment
+                               , interpreterLocals :: IORef (HashMap Expr Int)}
 
 globals :: Environment
 globals = unsafePerformIO $ do
@@ -28,7 +33,7 @@ globals = unsafePerformIO $ do
   return g
 
 newInterpreter :: IO Interpreter
-newInterpreter = return (Interpreter globals)
+newInterpreter = Interpreter globals <$> newIORef H.empty
 
 interpret :: Interpreter -> [Stmt] -> IO ()
 interpret i statements = do
@@ -55,10 +60,12 @@ evaluate i (Unary operator right) = do
                 let (VNumber n) = r
                 in return (VNumber (-n))
     _ -> return VNull
-evaluate i (Variable name) = get (interpreterEnvironment i) name
-evaluate i (Assign name value) = do
+evaluate i expr@(Variable name _) = lookupVariable i name expr
+evaluate i expr@(Assign name _ value) = do
   v <- evaluate i value
-  assign (interpreterEnvironment i) name v
+  distance <- H.lookup expr <$> readIORef (interpreterLocals i)
+  case distance of Just d -> assignAt (interpreterEnvironment i) d name v
+                   Nothing -> assign globals name v
   return v
 evaluate i (Binary left operator right) = do
   l <- evaluate i left
@@ -132,6 +139,16 @@ execute i b@(Block statements) = executeBlock i statements =<<
 executeBlock i statements environment =
   forM_ statements $ execute i { interpreterEnvironment = environment }
 
+resolveI :: Interpreter -> Expr -> Int -> IO ()
+resolveI i expr depth = modifyIORef (interpreterLocals i) (H.insert expr depth)
+
+lookupVariable :: Interpreter -> Token -> Expr -> IO Value
+lookupVariable i name expr = do
+  distance <- H.lookup expr <$> readIORef (interpreterLocals i)
+  case distance of
+    Just d -> getAt (interpreterEnvironment i) d (tokenLexeme name)
+    Nothing -> get globals name
+
 checkNumberOperand :: Token -> Value -> IO ()
 checkNumberOperand operator operand
   | VNumber _ <- operand = return ()
@@ -184,3 +201,9 @@ data ReturnException = ReturnException Value
 instance Exception ReturnException
 instance Show ReturnException where
   show = error "Undefined Show instance for ReturnException"
+
+instance Hashable TT.TokenType
+instance Hashable Literal
+instance Hashable Token
+instance Hashable Unique'
+instance Hashable Expr

@@ -1,5 +1,4 @@
 {-# LANGUAGE ExistentialQuantification,DeriveGeneric #-}
-
 module Interpreter where
 
 import Data.Char
@@ -22,6 +21,11 @@ import Misc
 import Stmt
 import Value
 import Environment
+import Class
+import Instance
+import Function
+import ReturnException
+import Callable
 
 data Interpreter = Interpreter { interpreterEnvironment :: Environment
                                , interpreterLocals :: IORef (HashMap Expr Int)}
@@ -51,6 +55,18 @@ evaluate i (Logical left operator right) = do
     (TT.Or,True) -> return l
     (TT.And,False) -> return l
     _ -> evaluate i right
+evaluate i (Get object name) = do
+  o <- evaluate i object
+  case o of VInstance inst -> getP inst name
+            _ -> throwIO (RuntimeError name "Only instances have properties.")
+evaluate i (Set object name value) = do
+  o <- evaluate i object
+  case o of VInstance inst -> do
+              v <- evaluate i value
+              setP inst name v
+              return v
+            _ -> throwIO (RuntimeError name "Only instances have fields.")
+evaluate i expr@(This keyword _) = lookupVariable i keyword expr
 evaluate i (Grouping expr) = evaluate i expr
 evaluate i (Unary operator right) = do
   r <- evaluate i right
@@ -113,10 +129,18 @@ evaluate i (Call callee paren arguments) = do
   call function i as
 
 execute :: Interpreter -> Stmt -> IO ()
+execute i (Class name methods) = do
+  define (interpreterEnvironment i) (tokenLexeme name) VNull
+  methods <- fmap H.fromList $ forM methods $ \method -> do
+    let function = newFunction method (interpreterEnvironment i)
+                     (tokenLexeme name == "init")
+    return (tokenLexeme (functionName method),function)
+  let klass = newClass (tokenLexeme name) methods
+  assign (interpreterEnvironment i) name (VCallable $ MkCallable klass)
 execute i (Expression expr) = void $ evaluate i expr
 execute i f@(Function name _ _) =
   define (interpreterEnvironment i) (tokenLexeme name)
-         (VCallable $ MkCallable (LoxFunction f (interpreterEnvironment i)))
+         (VCallable $ MkCallable $ newFunction f (interpreterEnvironment i) False)
 execute i (If condition thenBranch elseBranch) = do
   c <- isTruthy <$> evaluate i condition
   if c then execute i thenBranch
@@ -136,6 +160,7 @@ execute i (While condition body) = do
 execute i b@(Block statements) = executeBlock i statements =<<
                                    childEnvironment (interpreterEnvironment i)
 
+executeBlock :: Interpreter -> [Stmt] -> Environment -> IO ()
 executeBlock i statements environment =
   forM_ statements $ execute i { interpreterEnvironment = environment }
 
@@ -171,6 +196,7 @@ stringify (VNumber n) | ".0" `isSuffixOf` s = init (init s)
   where s = show n
 stringify (VString s) = s
 stringify (VCallable c) = toString c
+stringify (VInstance i) = Class.className (instanceClass i) ++ " instance"
 
 data Native = Native { nativeArity :: Int, nativeFn :: [Value] -> IO Value }
 instance Callable Native where
@@ -182,25 +208,6 @@ nativeClock :: [Value] -> IO Value
 nativeClock [] = do
   TimeSpec sec nsec <- getTime Monotonic
   return (VNumber $ fromIntegral sec + fromIntegral nsec / 10^9)
-
-data LoxFunction = LoxFunction { lfunDeclaration :: Stmt, lfunClosure :: Environment }
-instance Callable LoxFunction where
-  arity (LoxFunction (Function _ params _) _) = length params
-  call (LoxFunction (Function name params body) environment) i arguments = do
-    forM_ (zip params arguments) $ \(p,a) ->
-      define environment (tokenLexeme p) a
-    handle (\(ReturnException v) -> return v) $ do
-      executeBlock i body environment
-      return VNull
-  toString (LoxFunction (Function name _ _) _) = "<fn " ++ tokenLexeme name ++ ">"
-
-newLoxFunction :: Stmt -> Environment -> LoxFunction
-newLoxFunction = LoxFunction
-
-data ReturnException = ReturnException Value
-instance Exception ReturnException
-instance Show ReturnException where
-  show = error "Undefined Show instance for ReturnException"
 
 instance Hashable TT.TokenType
 instance Hashable Literal

@@ -6,7 +6,7 @@ import qualified Data.HashMap.Strict as H
 import Control.Exception
 
 import Token
-import Value
+import {-# SOURCE #-} Value
 import RuntimeError
 
 data Environment = Environment {

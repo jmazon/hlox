@@ -4,6 +4,7 @@ import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
 import Data.IORef
 import Data.List
+import Data.Maybe
 import Control.Monad
 
 import Token
@@ -12,21 +13,38 @@ import Stmt
 import {-# SOURCE #-} Interpreter
 import Misc
 
-data FunctionType = FT_None | FT_Function
+data FunctionType = FT_None | FT_Function | FT_Method | FT_Initializer
+data ClassType = CT_None | CT_Class
 
 data Resolver = Resolver
                 { resolverInterpreter :: Interpreter
                 , resolverScopes :: Stack (HashMap String Bool)
-                , resolverCurrentFunction :: IORef FunctionType }
+                , resolverCurrentFunction :: IORef FunctionType
+                , resolverCurrentClass :: IORef ClassType }
 
 newResolver :: Interpreter -> IO Resolver
-newResolver i = liftM2 (Resolver i) emptyStack (newIORef FT_None)
+newResolver i = liftM3 (Resolver i)
+                  emptyStack (newIORef FT_None) (newIORef CT_None)
 
 resolveS :: Resolver -> Stmt -> IO ()
 resolveS r (Block statements) = do
   beginScope r
   mapM_ (resolveS r) statements
   endScope r
+resolveS r (Class name methods) = do
+  enclosingClass <- readIORef (resolverCurrentClass r)
+  writeIORef (resolverCurrentClass r) CT_Class
+  declare r name
+  define r name
+  beginScope r
+  s <- pop (resolverScopes r)
+  push (resolverScopes r) (H.insert "this" True s)
+  forM_ methods $ \method -> do
+    let declaration | tokenLexeme (functionName method) == "init" = FT_Initializer
+                    | otherwise = FT_Method
+    resolveFunction r method declaration
+  endScope r
+  writeIORef (resolverCurrentClass r) enclosingClass
 resolveS r (Expression expression) = resolveE r expression
 resolveS r stmt@(Function name _ _) = do
   declare r name
@@ -42,7 +60,10 @@ resolveS r (Return keyword value) = do
   case cf of
     FT_None -> void $ tokenError keyword "Cannot return from top-level code."
     _ -> return ()
-  maybe (return ()) (resolveE r) value
+  when (isJust value) $ do
+    case cf of FT_Initializer -> void $ tokenError keyword "Cannot return a value from an initializer."
+               _ -> return ()
+    resolveE r (fromJust value)
 resolveS r (Var name initializer) = do
   declare r name
   maybe (return ()) (resolveE r) initializer
@@ -61,11 +82,19 @@ resolveE r (Binary left _ right) = do
 resolveE r (Call callee _ arguments) = do
   resolveE r callee
   mapM_ (resolveE r) arguments
+resolveE r (Get object _) = resolveE r object
 resolveE r (Grouping expression) = resolveE r expression
 resolveE _ (Literal _) = return ()
 resolveE r (Logical left _ right) = do
   resolveE r left
   resolveE r right
+resolveE r (Set object _ value) = do
+  resolveE r value
+  resolveE r object
+resolveE r expr@(This keyword _) = do
+  cc <- readIORef (resolverCurrentClass r)
+  case cc of CT_None -> void $ tokenError keyword "Cannot use 'this' outside of a class."
+             _ -> resolveLocal r expr keyword
 resolveE r (Unary _ right) = resolveE r right
 resolveE r expr@(Variable name _) = do
   whenM (not <$> isEmpty (resolverScopes r)) $

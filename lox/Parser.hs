@@ -36,9 +36,19 @@ expression = assignment
 declaration :: Parser -> IO (Maybe Stmt)
 declaration p = do
   handle (\ParseError -> synchronize p >> return Nothing) $ Just <$> caseM
-    [ (match p [TT.Fun],function p "function")
+    [ (match p [TT.Class],classDeclaration p)
+    , (match p [TT.Fun],function p "function")
     , (match p [TT.Var],varDeclaration p) ]
     (statement p)
+
+classDeclaration :: Parser -> IO Stmt
+classDeclaration p = do
+  name <- consume p TT.Identifier "Expect class name."
+  consume p TT.LeftBrace "Expect '{' before class body."
+  methods <- whileM (andM [not <$> check p TT.RightBrace,not <$> isAtEnd p]) $
+               function p "method"
+  consume p TT.RightBrace "Expect '}' after class body."
+  return (Class name methods)
 
 statement :: Parser -> IO Stmt
 statement p = caseM
@@ -156,6 +166,8 @@ assignment p = do
       case expr of Variable name _ -> do
                      u <- newUnique
                      return (Assign name (Unique' u) value)
+                   Get object name -> do
+                     return (Set object name value)
                    _ -> tokenError equals "Invalid assignment target."
                         >> return (Literal LNull)
     else return expr
@@ -202,8 +214,11 @@ call :: Parser -> IO Expr
 call p = flip runContT readIORef $ do
   expr <- lift (newIORef =<< primary p)
   callCC $ \exit -> forever $ do
-    ifM (lift $ match p [TT.LeftParen])
-        (lift $ writeIORef expr =<< finishCall p =<< readIORef expr)
+    caseM [ (lift $ match p [TT.LeftParen]
+            ,lift $ writeIORef expr =<< finishCall p =<< readIORef expr)
+          , (lift $ match p [TT.Dot]
+            ,lift $ do name <- consume p TT.Identifier "Expect property name after '.'."
+                       writeIORef expr . flip Get name =<< readIORef expr) ]
       (exit ())
   return expr
 
@@ -214,6 +229,7 @@ primary p = caseM
   , (match p [TT.Nil],return (Literal (LNull)))
   , (match p [TT.Number],Literal . tokenLiteral <$> previous p)
   , (match p [TT.String],Literal . tokenLiteral <$> previous p)
+  , (match p [TT.This],liftM2 This (previous p) (Unique' <$> newUnique))
   , (match p [TT.Identifier],liftM2 Variable (previous p) (Unique' <$> newUnique))
   , (match p [TT.LeftParen],do
         expr <- expression p

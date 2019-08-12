@@ -44,11 +44,14 @@ declaration p = do
 classDeclaration :: Parser -> IO Stmt
 classDeclaration p = do
   name <- consume p TT.Identifier "Expect class name."
+  superclass <- ifM (match p [TT.Less]) (consume p TT.Identifier "Expect superclass name." >>
+                                         Just <$> liftM2 Variable (previous p) (Unique' <$> newUnique))
+                      (return Nothing)
   consume p TT.LeftBrace "Expect '{' before class body."
   methods <- whileM (andM [not <$> check p TT.RightBrace,not <$> isAtEnd p]) $
                function p "method"
   consume p TT.RightBrace "Expect '}' after class body."
-  return (Class name methods)
+  return (Class name superclass methods)
 
 statement :: Parser -> IO Stmt
 statement p = caseM
@@ -229,6 +232,12 @@ primary p = caseM
   , (match p [TT.Nil],return (Literal (LNull)))
   , (match p [TT.Number],Literal . tokenLiteral <$> previous p)
   , (match p [TT.String],Literal . tokenLiteral <$> previous p)
+  , (match p [TT.Super],do
+        keyword <- previous p
+        consume p TT.Dot "Expect '.' after 'super'."
+        method <- consume p TT.Identifier "Expect superclass method name."
+        id <- Unique' <$> newUnique
+        return (Super keyword id method))
   , (match p [TT.This],liftM2 This (previous p) (Unique' <$> newUnique))
   , (match p [TT.Identifier],liftM2 Variable (previous p) (Unique' <$> newUnique))
   , (match p [TT.LeftParen],do

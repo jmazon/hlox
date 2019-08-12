@@ -5,6 +5,7 @@ import Data.HashMap.Strict (HashMap)
 import Data.IORef
 import Data.List
 import Data.Maybe
+import Data.Functor
 import Control.Monad
 
 import Token
@@ -14,7 +15,7 @@ import {-# SOURCE #-} Interpreter
 import Misc
 
 data FunctionType = FT_None | FT_Function | FT_Method | FT_Initializer
-data ClassType = CT_None | CT_Class
+data ClassType = CT_None | CT_Class | CT_Subclass
 
 data Resolver = Resolver
                 { resolverInterpreter :: Interpreter
@@ -31,11 +32,20 @@ resolveS r (Block statements) = do
   beginScope r
   mapM_ (resolveS r) statements
   endScope r
-resolveS r (Class name methods) = do
+resolveS r (Class name superclass methods) = do
   enclosingClass <- readIORef (resolverCurrentClass r)
   writeIORef (resolverCurrentClass r) CT_Class
   declare r name
   define r name
+  sequence_ $ flip fmap superclass $ \sc ->
+    when (tokenLexeme name == tokenLexeme (variableName sc)) $
+      void $ tokenError (variableName sc) "A class cannot inherit from itself."
+  sequence_ $ (writeIORef (resolverCurrentClass r) CT_Subclass) <$ superclass
+  sequence_ $ resolveE r <$> superclass
+  sequence_ $ flip fmap superclass $ \sc -> do
+    beginScope r
+    s <- pop (resolverScopes r)
+    push (resolverScopes r) (H.insert "super" True s)
   beginScope r
   s <- pop (resolverScopes r)
   push (resolverScopes r) (H.insert "this" True s)
@@ -44,6 +54,7 @@ resolveS r (Class name methods) = do
                     | otherwise = FT_Method
     resolveFunction r method declaration
   endScope r
+  sequence_ $ endScope r <$ superclass
   writeIORef (resolverCurrentClass r) enclosingClass
 resolveS r (Expression expression) = resolveE r expression
 resolveS r stmt@(Function name _ _) = do
@@ -91,6 +102,14 @@ resolveE r (Logical left _ right) = do
 resolveE r (Set object _ value) = do
   resolveE r value
   resolveE r object
+resolveE r expr@(Super keyword _ method) = do
+  cc <- readIORef (resolverCurrentClass r)
+  case cc of
+    CT_None -> void $ tokenError keyword "Cannot use 'super' outside of a class."
+    _ -> case cc of
+      CT_Subclass -> return ()
+      _ -> void $ tokenError keyword "Cannot use 'super' in a class with no superclass."
+  resolveLocal r expr keyword
 resolveE r expr@(This keyword _) = do
   cc <- readIORef (resolverCurrentClass r)
   case cc of CT_None -> void $ tokenError keyword "Cannot use 'this' outside of a class."

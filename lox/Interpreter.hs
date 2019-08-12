@@ -66,6 +66,15 @@ evaluate i (Set object name value) = do
               setP inst name v
               return v
             _ -> throwIO (RuntimeError name "Only instances have fields.")
+evaluate i expr@(Super _ _ method) = do
+  Just distance <- H.lookup expr <$> readIORef (interpreterLocals i)
+  VCallable super <- getAt (interpreterEnvironment i) distance "super"
+  let Just superclass = isClass super
+  -- "this" is always one level nearer than "super"'s environment
+  VInstance object <- getAt (interpreterEnvironment i) (distance - 1) "this"
+  case findMethod superclass (tokenLexeme method) of
+    Just m -> VCallable . MkCallable <$> bind m object
+    Nothing -> throwIO (RuntimeError method ("Undefined property '" ++ tokenLexeme method ++ "'."))
 evaluate i expr@(This keyword _) = lookupVariable i keyword expr
 evaluate i (Grouping expr) = evaluate i expr
 evaluate i (Unary operator right) = do
@@ -129,13 +138,22 @@ evaluate i (Call callee paren arguments) = do
   call function i as
 
 execute :: Interpreter -> Stmt -> IO ()
-execute i (Class name methods) = do
+execute i (Class name superclass methods) = do
+  sc <- sequence $ flip fmap superclass $ \sc -> do
+    sc' <- evaluate i sc
+    case sc' of VCallable cb | Just cs <- isClass cb -> return cs
+                _ -> throwIO (RuntimeError (variableName sc) "Superclass must be a class.")
   define (interpreterEnvironment i) (tokenLexeme name) VNull
+  environment <- case sc of
+    Just sc -> do
+      environment <- childEnvironment (interpreterEnvironment i)
+      define environment "super" (VCallable $ MkCallable sc)
+      return environment
+    Nothing -> return (interpreterEnvironment i)
   methods <- fmap H.fromList $ forM methods $ \method -> do
-    let function = newFunction method (interpreterEnvironment i)
-                     (tokenLexeme name == "init")
+    let function = newFunction method environment (tokenLexeme name == "init")
     return (tokenLexeme (functionName method),function)
-  let klass = newClass (tokenLexeme name) methods
+  let klass = newClass (tokenLexeme name) sc methods
   assign (interpreterEnvironment i) name (VCallable $ MkCallable klass)
 execute i (Expression expr) = void $ evaluate i expr
 execute i f@(Function name _ _) =

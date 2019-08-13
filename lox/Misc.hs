@@ -14,8 +14,8 @@ loxError line message = do
 
 report :: Int -> String -> String -> IO ()
 report line location message = do
-  putStrLn $ "[line " ++ show line ++ "] Error" ++ location
-             ++ ": " ++ message
+  hPutStrLn stderr $ "[line " ++ show line ++ "] Error" ++ location
+                     ++ ": " ++ message
   writeGlobal hadError True
 
 data ParseError = ParseError deriving Show

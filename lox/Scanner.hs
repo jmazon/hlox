@@ -131,7 +131,7 @@ string s = do
   ae <- isAtEnd s
   if ae then do
     l <- readIORef (scannerLine s)
-    loxError l "Unterminated string"
+    loxError l "Unterminated string."
       else do
 
     -- The closing "

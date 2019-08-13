@@ -114,7 +114,7 @@ evaluate i (Binary left operator right) = do
 
     TT.Plus | VNumber vl <- l, VNumber vr <- r -> return (VNumber (vl + vr))
             | VString vl <- l, VString vr <- r -> return (VString (vl ++ vr))
-            | otherwise -> throwIO (RuntimeError operator "Operands must be tzo nuimbers or two strings.")
+            | otherwise -> throwIO (RuntimeError operator "Operands must be two numbers or two strings.")
     TT.Minus -> checkNumberOperands operator l r >>
                 let (VNumber vl) = l; (VNumber vr) = r
                 in return (VNumber (vl - vr))

@@ -12,6 +12,7 @@ import Control.Monad.Loops
 import Control.Exception hiding (evaluate)
 import System.IO.Unsafe
 import System.Clock
+import Numeric
 
 import qualified TokenType as TT
 import Token
@@ -211,7 +212,7 @@ stringify VNull = "nil"
 stringify (VBool b) = map toLower (show b)
 stringify (VNumber n) | ".0" `isSuffixOf` s = init (init s)
                       | otherwise = s
-  where s = show n
+  where s = showFFloat Nothing n ""
 stringify (VString s) = s
 stringify (VCallable c) = toString c
 stringify (VInstance i) = Class.className (instanceClass i) ++ " instance"

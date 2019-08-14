@@ -1,4 +1,3 @@
-{-# LANGUAGE ExistentialQuantification,DeriveGeneric #-}
 module Interpreter where
 
 import Data.Char (toLower)

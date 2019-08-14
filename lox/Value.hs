@@ -1,4 +1,3 @@
-{-# LANGUAGE ExistentialQuantification #-}
 module Value where
 
 import {-# SOURCE #-} LoxInstance

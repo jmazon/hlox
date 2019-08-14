@@ -8,7 +8,7 @@ import Stmt
 import Token
 import LoxCallable
 import Environment
-import ReturnException
+import Return
 import {-# SOURCE #-} Interpreter
 import {-# SOURCE #-} Value
 import {-# SOURCE #-} LoxInstance
@@ -20,7 +20,7 @@ instance Callable LoxFunction where
     environment <- childEnvironment closure
     forM_ (zip params arguments) $ \(p,a) ->
       define environment (tokenLexeme p) a
-    handle (\(ReturnException v) -> if isInitializer
+    handle (\(Return.Return v) -> if isInitializer
                                     then getAt closure 0 "this"
                                     else return v) $ do
       executeBlock i body environment

@@ -26,7 +26,7 @@ import Environment
 import LoxClass
 import LoxInstance
 import LoxFunction
-import ReturnException
+import Return
 import LoxCallable
 
 data Interpreter = Interpreter { interpreterEnvironment :: Environment
@@ -168,9 +168,9 @@ execute i (If condition thenBranch elseBranch) = do
 execute i (Print value) = do
   v <- evaluate i value
   putStrLn (stringify v)
-execute i (Return _ value) = do
+execute i (Stmt.Return _ value) = do
   v <- maybe (return VNull) (evaluate i) value
-  throwIO (ReturnException v)
+  throwIO (Return.Return v)
 execute i (Var name initializer) = do
   value <- maybe (return VNull) (evaluate i) initializer
   define (interpreterEnvironment i) (tokenLexeme name) value

@@ -1,6 +1,8 @@
 {-# LANGUAGE ExistentialQuantification #-}
 module Callable where
 
+import Data.Unique
+
 import {-# SOURCE #-} Value
 import {-# SOURCE #-} Interpreter
 import {-# SOURCE #-} Class
@@ -9,6 +11,7 @@ class Callable c where
   arity :: c -> Int
   call :: c -> Interpreter -> [Value] -> IO Value
   toString :: c -> String
+  callableId :: c -> Unique
   isClass :: c -> Maybe LoxClass
   isClass = const Nothing
 
@@ -18,4 +21,5 @@ instance Callable MkCallable where
   arity (MkCallable c) = arity c
   call (MkCallable c) = call c
   toString (MkCallable c) = toString c
+  callableId (MkCallable c) = callableId c
   isClass (MkCallable c) = isClass c

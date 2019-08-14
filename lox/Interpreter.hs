@@ -13,6 +13,7 @@ import Control.Exception hiding (evaluate)
 import System.IO.Unsafe
 import System.Clock
 import Numeric
+import Data.Unique
 
 import qualified TokenType as TT
 import Token
@@ -34,7 +35,7 @@ data Interpreter = Interpreter { interpreterEnvironment :: Environment
 globals :: Environment
 globals = unsafePerformIO $ do
   g <- newEnvironment
-  define g "clock" (VCallable $ MkCallable $ Native 0 nativeClock)
+  define g "clock" . VCallable . MkCallable . Native 0 nativeClock =<< newUnique
   return g
 
 newInterpreter :: IO Interpreter
@@ -152,14 +153,14 @@ execute i (Class name superclass methods) = do
       return environment
     Nothing -> return (interpreterEnvironment i)
   methods <- fmap H.fromList $ forM methods $ \method -> do
-    let function = newFunction method environment (tokenLexeme name == "init")
+    function <- newFunction method environment (tokenLexeme name == "init")
     return (tokenLexeme (functionName method),function)
-  let klass = newClass (tokenLexeme name) sc methods
+  klass <- newClass (tokenLexeme name) sc methods
   assign (interpreterEnvironment i) name (VCallable $ MkCallable klass)
 execute i (Expression expr) = void $ evaluate i expr
 execute i f@(Function name _ _) =
-  define (interpreterEnvironment i) (tokenLexeme name)
-         (VCallable $ MkCallable $ newFunction f (interpreterEnvironment i) False)
+  define (interpreterEnvironment i) (tokenLexeme name) .
+    VCallable . MkCallable =<< newFunction f (interpreterEnvironment i) False
 execute i (If condition thenBranch elseBranch) = do
   c <- isTruthy <$> evaluate i condition
   if c then execute i thenBranch
@@ -217,11 +218,14 @@ stringify (VString s) = s
 stringify (VCallable c) = toString c
 stringify (VInstance i) = Class.className (instanceClass i) ++ " instance"
 
-data Native = Native { nativeArity :: Int, nativeFn :: [Value] -> IO Value }
+data Native = Native { nativeArity :: Int
+                     , nativeFn :: [Value] -> IO Value
+                     , nativeId :: Unique }
 instance Callable Native where
   arity = nativeArity
   call n _ vs = (nativeFn n) vs
   toString _ = "<native fn>"
+  callableId = nativeId
 
 nativeClock :: [Value] -> IO Value
 nativeClock [] = do

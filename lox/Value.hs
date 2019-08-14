@@ -13,6 +13,7 @@ instance Eq Value where
   VNumber a == VNumber b = a == b
   VBool a == VBool b = a == b
   VString a == VString b = a == b
+  VCallable a == VCallable b = callableId a == callableId b
   _ == _ = False
 
 isCallable (VCallable _) = True

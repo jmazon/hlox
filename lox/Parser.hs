@@ -137,10 +137,9 @@ function p kind = do
   name <- consume p TT.Identifier $ "Expect " ++ kind ++ " name."
   consume p TT.LeftParen $ "Expect '(' after " ++ kind ++ " name."
 
-  let f i = do
-        when (i == 255) $ void $ flip tokenError "Cannot have more than 255 parameters." =<< peek p
-        ifM (match p [TT.Comma]) (Just . flip (,) (i+1) <$> c)
-                                 (return Nothing)
+  let f i = flip (ifM (match p [TT.Comma])) (return Nothing) $ do
+        when (i >= 255) $ void $ flip tokenError "Cannot have more than 255 parameters." =<< peek p
+        Just . flip (,) (i+1) <$> c
       c = consume p TT.Identifier "Expect parameter name."
   parameters <- ifM (not <$> check p TT.RightParen)
                   (liftM2 (:) c (unfoldrM f 1)) (return [])
@@ -203,10 +202,9 @@ unary p = do
 
 finishCall :: Parser -> Expr -> IO Expr
 finishCall p callee = do
-  let f i = do
-        when (i == 255) $ void $ flip tokenError "Cannot have more than 255 arguments." =<< peek p
-        ifM (match p [TT.Comma]) (Just . flip (,) (i+1) <$> expression p)
-                                 (return Nothing)
+  let f i = flip (ifM (match p [TT.Comma])) (return Nothing) $ do
+        when (i >= 255) $ void $ flip tokenError "Cannot have more than 255 arguments." =<< peek p
+        Just . flip (,) (i+1) <$> expression p
   arguments <- ifM (not <$> check p TT.RightParen)
                  (liftM2 (:) (expression p) (unfoldrM f 1))
                  (return [])

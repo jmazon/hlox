@@ -153,7 +153,7 @@ execute i (Class name superclass methods) = do
       return environment
     Nothing -> return (interpreterEnvironment i)
   methods <- fmap H.fromList $ forM methods $ \method -> do
-    function <- newFunction method environment (tokenLexeme name == "init")
+    function <- newFunction method environment (tokenLexeme (functionName method) == "init")
     return (tokenLexeme (functionName method),function)
   klass <- newClass (tokenLexeme name) sc methods
   assign (interpreterEnvironment i) name (VCallable $ MkCallable klass)

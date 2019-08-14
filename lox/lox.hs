@@ -1,6 +1,7 @@
 import Control.Monad
 import System.Environment
 import System.Exit
+import System.IO
 
 import Globals
 import Scanner
@@ -33,6 +34,7 @@ runFile interpreter path = do
 runPrompt :: Interpreter -> IO ()
 runPrompt interpreter = forever $ do
   putStr "> "
+  hFlush stdout
   run interpreter =<< getLine
   writeGlobal hadError False
 

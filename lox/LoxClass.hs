@@ -5,10 +5,10 @@ import qualified Data.HashMap.Strict as H
 import Control.Monad
 import Control.Applicative
 import Data.Unique
+import Data.Dynamic
 
 import LoxCallable
 import LoxFunction
-import {-# SOURCE #-} Value
 import {-# SOURCE #-} LoxInstance
 
 data LoxClass = LoxClass { className :: String
@@ -25,7 +25,7 @@ instance Callable LoxClass where
     inst <- newInstance c
     let initializer = findMethod c "init"
     maybe (return ()) (flip bind inst >=> \c -> void $ call c i arguments) initializer
-    return (VInstance inst)
+    return (toDyn inst)
   toString c = className c
   callableId = classId
   isClass = Just

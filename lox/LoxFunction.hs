@@ -3,6 +3,7 @@ module LoxFunction where
 import Control.Exception
 import Control.Monad
 import Data.Unique
+import Data.Dynamic
 
 import Stmt
 import Token
@@ -10,7 +11,6 @@ import LoxCallable
 import Environment
 import Return
 import {-# SOURCE #-} Interpreter
-import {-# SOURCE #-} Value
 import {-# SOURCE #-} LoxInstance
 
 data LoxFunction = LoxFunction { lfunDeclaration :: Stmt, lfunClosure :: Environment, lfunIsInitializer :: Bool, lfunId :: Unique }
@@ -24,7 +24,7 @@ instance Callable LoxFunction where
                                     then getAt closure 0 "this"
                                     else return v) $ do
       executeBlock i body environment
-      if isInitializer then getAt closure 0 "this" else return VNull
+      if isInitializer then getAt closure 0 "this" else return (toDyn ())
   callableId = lfunId
   toString (LoxFunction (Function name _ _) _ _ _) = "<fn " ++ tokenLexeme name ++ ">"
 
@@ -34,5 +34,5 @@ newFunction decl closure isInit = LoxFunction decl closure isInit <$> newUnique
 bind :: LoxFunction -> LoxInstance -> IO LoxFunction
 bind f inst = do
   e <- childEnvironment (lfunClosure f)
-  define e "this" (VInstance inst)
+  define e "this" (toDyn inst)
   newFunction (lfunDeclaration f) e (lfunIsInitializer f)

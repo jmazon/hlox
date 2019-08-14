@@ -1,10 +1,9 @@
 module Return where
 
 import Control.Exception
+import Data.Dynamic
 
-import {-# SOURCE #-} Value
-
-data Return = Return Value
+data Return = Return Dynamic
 instance Exception Return
 instance Show Return where
   show = error "Undefined Show instance for Return"

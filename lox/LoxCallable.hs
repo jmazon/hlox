@@ -2,14 +2,14 @@
 module LoxCallable where
 
 import Data.Unique
+import Data.Dynamic
 
-import {-# SOURCE #-} Value
 import {-# SOURCE #-} Interpreter
 import {-# SOURCE #-} LoxClass
 
 class Callable c where
   arity :: c -> Int
-  call :: c -> Interpreter -> [Value] -> IO Value
+  call :: c -> Interpreter -> [Dynamic] -> IO Dynamic
   toString :: c -> String
   callableId :: c -> Unique
   isClass :: c -> Maybe LoxClass

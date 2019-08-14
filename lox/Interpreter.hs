@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 module Interpreter where
 
 import Data.Char (toLower)
@@ -13,6 +14,7 @@ import System.IO.Unsafe
 import System.Clock
 import Numeric
 import Data.Unique
+import Data.Dynamic
 
 import qualified TokenType as TT
 import Token
@@ -20,7 +22,6 @@ import Expr
 import RuntimeError
 import Misc
 import Stmt
-import Value
 import Environment
 import LoxClass
 import LoxInstance
@@ -34,7 +35,7 @@ data Interpreter = Interpreter { interpreterEnvironment :: Environment
 globals :: Environment
 globals = unsafePerformIO $ do
   g <- newEnvironment
-  define g "clock" . VCallable . MkCallable . Native 0 nativeClock =<< newUnique
+  define g "clock" . toDyn . MkCallable . Native 0 nativeClock =<< newUnique
   return g
 
 newInterpreter :: IO Interpreter
@@ -45,11 +46,11 @@ interpret i statements = do
   (mapM_ (execute i) statements) `catch`
     (\e -> runtimeError (e :: RuntimeError))
 
-evaluate :: Interpreter -> Expr -> IO Value
-evaluate _ (Literal LNull) = return VNull
-evaluate _ (Literal (LNumber n)) = return (VNumber n)
-evaluate _ (Literal (LBool b)) = return (VBool b)
-evaluate _ (Literal (LString s)) = return (VString s)
+evaluate :: Interpreter -> Expr -> IO Dynamic
+evaluate _ (Literal LNull) = return (toDyn ())
+evaluate _ (Literal (LNumber n)) = return (toDyn n)
+evaluate _ (Literal (LBool b)) = return (toDyn b)
+evaluate _ (Literal (LString s)) = return (toDyn s)
 evaluate i (Logical left operator right) = do
   l <- evaluate i left
   case (tokenType operator,isTruthy l) of
@@ -58,34 +59,34 @@ evaluate i (Logical left operator right) = do
     _ -> evaluate i right
 evaluate i (Get object name) = do
   o <- evaluate i object
-  case o of VInstance inst -> getP inst name
-            _ -> throwIO (RuntimeError name "Only instances have properties.")
+  case fromDynamic o of Just inst -> getP inst name
+                        Nothing -> throwIO (RuntimeError name "Only instances have properties.")
 evaluate i (Set object name value) = do
   o <- evaluate i object
-  case o of VInstance inst -> do
-              v <- evaluate i value
-              setP inst name v
-              return v
-            _ -> throwIO (RuntimeError name "Only instances have fields.")
+  case fromDynamic o of Just inst -> do
+                          v <- evaluate i value
+                          setP inst name v
+                          return v
+                        Nothing -> throwIO (RuntimeError name "Only instances have fields.")
 evaluate i expr@(Super _ _ method) = do
   Just distance <- H.lookup expr <$> readIORef (interpreterLocals i)
-  VCallable super <- getAt (interpreterEnvironment i) distance "super"
-  let Just superclass = isClass super
+  Just super <- fromDynamic <$> getAt (interpreterEnvironment i) distance "super"
+  let Just superclass = isClass (super :: MkCallable)
   -- "this" is always one level nearer than "super"'s environment
-  VInstance object <- getAt (interpreterEnvironment i) (distance - 1) "this"
+  Just object <- fromDynamic <$> getAt (interpreterEnvironment i) (distance - 1) "this"
   case findMethod superclass (tokenLexeme method) of
-    Just m -> VCallable . MkCallable <$> bind m object
+    Just m -> toDyn . MkCallable <$> bind m object
     Nothing -> throwIO (RuntimeError method ("Undefined property '" ++ tokenLexeme method ++ "'."))
 evaluate i expr@(This keyword _) = lookupVariable i keyword expr
 evaluate i (Grouping expr) = evaluate i expr
 evaluate i (Unary operator right) = do
   r <- evaluate i right
   case tokenType operator of
-    TT.Bang -> return (VBool (not (isTruthy r)))
+    TT.Bang -> return (toDyn (not (isTruthy r)))
     TT.Minus -> checkNumberOperand operator r >>
-                let (VNumber n) = r
-                in return (VNumber (-n))
-    _ -> return VNull
+                let Just (n :: Double) = fromDynamic r
+                in return (toDyn (-n))
+    _ -> return (toDyn ())
 evaluate i expr@(Variable name _) = lookupVariable i name expr
 evaluate i expr@(Assign name _ value) = do
   v <- evaluate i value
@@ -98,68 +99,69 @@ evaluate i (Binary left operator right) = do
   r <- evaluate i right
   case tokenType operator of
     TT.Greater -> checkNumberOperands operator l r >>
-                  let (VNumber vl) = l; (VNumber vr) = r
-                  in return (VBool (vl > vr))
+                  let Just (vl :: Double) = fromDynamic l; Just vr = fromDynamic r
+                  in return (toDyn (vl > vr))
     TT.GreaterEqual -> checkNumberOperands operator l r >>
-                       let (VNumber vl) = l; (VNumber vr) = r
-                       in return (VBool (vl >= vr))
+                       let Just (vl :: Double) = fromDynamic l; Just vr = fromDynamic r
+                       in return (toDyn (vl >= vr))
     TT.Less -> checkNumberOperands operator l r >>
-               let (VNumber vl) = l; (VNumber vr) = r
-               in return (VBool (vl < vr))
+               let Just (vl :: Double) = fromDynamic l; Just vr = fromDynamic r
+               in return (toDyn (vl < vr))
     TT.LessEqual -> checkNumberOperands operator l r >>
-                    let (VNumber vl) = l; (VNumber vr) = r
-                    in return (VBool (vl <= vr))
+                    let Just (vl :: Double) = fromDynamic l; Just vr = fromDynamic r
+                    in return (toDyn (vl <= vr))
 
-    TT.BangEqual -> return (VBool (l /= r))
-    TT.EqualEqual -> return (VBool (l == r))
+    TT.BangEqual -> return (toDyn (not (isEqual l r)))
+    TT.EqualEqual -> return (toDyn (isEqual l r))
 
-    TT.Plus | VNumber vl <- l, VNumber vr <- r -> return (VNumber (vl + vr))
-            | VString vl <- l, VString vr <- r -> return (VString (vl ++ vr))
+    TT.Plus | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl + vr :: Double))
+            | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl ++ vr :: String))
             | otherwise -> throwIO (RuntimeError operator "Operands must be two numbers or two strings.")
     TT.Minus -> checkNumberOperands operator l r >>
-                let (VNumber vl) = l; (VNumber vr) = r
-                in return (VNumber (vl - vr))
+                let (Just vl) = fromDynamic l; (Just vr) = fromDynamic r
+                in return (toDyn (vl - vr :: Double))
     TT.Slash -> checkNumberOperands operator l r >>
-                let (VNumber vl) = l; (VNumber vr) = r
-                in return (VNumber (vl / vr))
+                let (Just vl) = fromDynamic l; (Just vr) = fromDynamic r
+                in return (toDyn (vl / vr :: Double))
     TT.Star -> checkNumberOperands operator l r >>
-               let (VNumber vl) = l; (VNumber vr) = r
-               in return (VNumber (vl * vr))
-    _ -> return VNull
+               let (Just vl) = fromDynamic l; (Just vr) = fromDynamic r
+               in return (toDyn (vl * vr :: Double))
+    _ -> return (toDyn ())
 evaluate i (Call callee paren arguments) = do
   c <- evaluate i callee
   as <- mapM (evaluate i) arguments
-  unless (isCallable c) $
-    throwIO $ RuntimeError paren "Can only call functions and classes."
-  let (VCallable function) = c
-  when (length arguments /= arity function) $ do
-    throwIO $ RuntimeError paren $ "Expected " ++ show (arity function) ++
-                                   " arguments but got " ++
-                                   show (length arguments) ++ "."
-  call function i as
+  case fromDynamic c of
+    Nothing -> throwIO $ RuntimeError paren "Can only call functions and classes."
+    Just function -> do
+      when (length arguments /= arity (function :: MkCallable)) $ do
+        throwIO $ RuntimeError paren $ "Expected " ++ show (arity function) ++
+                                       " arguments but got " ++
+                                       show (length arguments) ++ "."
+      call function i as
 
 execute :: Interpreter -> Stmt -> IO ()
 execute i (Class name superclass methods) = do
   sc <- sequence $ flip fmap superclass $ \sc -> do
     sc' <- evaluate i sc
-    case sc' of VCallable cb | Just cs <- isClass cb -> return cs
-                _ -> throwIO (RuntimeError (variableName sc) "Superclass must be a class.")
-  define (interpreterEnvironment i) (tokenLexeme name) VNull
+    case fromDynamic sc' of
+      Just (cb :: MkCallable) | Just cs <- isClass cb -> return cs
+      _ -> throwIO (RuntimeError (variableName sc) "Superclass must be a class.")
+  define (interpreterEnvironment i) (tokenLexeme name) (toDyn ())
   environment <- case sc of
     Just sc -> do
       environment <- childEnvironment (interpreterEnvironment i)
-      define environment "super" (VCallable $ MkCallable sc)
+      define environment "super" (toDyn $ MkCallable sc)
       return environment
     Nothing -> return (interpreterEnvironment i)
   methods <- fmap H.fromList $ forM methods $ \method -> do
     function <- newFunction method environment (tokenLexeme (functionName method) == "init")
     return (tokenLexeme (functionName method),function)
   klass <- newClass (tokenLexeme name) sc methods
-  assign (interpreterEnvironment i) name (VCallable $ MkCallable klass)
+  assign (interpreterEnvironment i) name (toDyn $ MkCallable klass)
 execute i (Expression expr) = void $ evaluate i expr
 execute i f@(Function name _ _) =
   define (interpreterEnvironment i) (tokenLexeme name) .
-    VCallable . MkCallable =<< newFunction f (interpreterEnvironment i) False
+    toDyn . MkCallable =<< newFunction f (interpreterEnvironment i) False
 execute i (If condition thenBranch elseBranch) = do
   c <- isTruthy <$> evaluate i condition
   if c then execute i thenBranch
@@ -168,10 +170,10 @@ execute i (Print value) = do
   v <- evaluate i value
   putStrLn (stringify v)
 execute i (Stmt.Return _ value) = do
-  v <- maybe (return VNull) (evaluate i) value
+  v <- maybe (return (toDyn ())) (evaluate i) value
   throwIO (Return.Return v)
 execute i (Var name initializer) = do
-  value <- maybe (return VNull) (evaluate i) initializer
+  value <- maybe (return (toDyn ())) (evaluate i) initializer
   define (interpreterEnvironment i) (tokenLexeme name) value
 execute i (While condition body) = do
   whileM_ (isTruthy <$> evaluate i condition)
@@ -186,39 +188,49 @@ executeBlock i statements environment =
 resolveI :: Interpreter -> Expr -> Int -> IO ()
 resolveI i expr depth = modifyIORef (interpreterLocals i) (H.insert expr depth)
 
-lookupVariable :: Interpreter -> Token -> Expr -> IO Value
+lookupVariable :: Interpreter -> Token -> Expr -> IO Dynamic
 lookupVariable i name expr = do
   distance <- H.lookup expr <$> readIORef (interpreterLocals i)
   case distance of
     Just d -> getAt (interpreterEnvironment i) d (tokenLexeme name)
     Nothing -> get globals name
 
-checkNumberOperand :: Token -> Value -> IO ()
+checkNumberOperand :: Token -> Dynamic -> IO ()
 checkNumberOperand operator operand
-  | VNumber _ <- operand = return ()
+  | Just (_ :: Double) <- fromDynamic operand = return ()
   | otherwise = throwIO (RuntimeError operator "Operand must be a number.")
 
-checkNumberOperands :: Token -> Value -> Value -> IO ()
+checkNumberOperands :: Token -> Dynamic -> Dynamic -> IO ()
 checkNumberOperands operator left right
-  | VNumber _ <- left, VNumber _ <- right = return ()
+  | Just (_ :: Double) <- fromDynamic left
+  , Just (_ :: Double) <- fromDynamic right = return ()
   | otherwise = throwIO (RuntimeError operator "Operands must be numbers.")
 
-isTruthy VNull = False
-isTruthy (VBool b) = b
-isTruthy _ = True
+isTruthy v | Just () <- fromDynamic v = False
+isTruthy v = fromDyn v True
 
-stringify :: Value -> String
-stringify VNull = "nil"
-stringify (VBool b) = map toLower (show b)
-stringify (VNumber n) | ".0" `isSuffixOf` s = init (init s)
-                      | otherwise = s
-  where s = showFFloat Nothing n ""
-stringify (VString s) = s
-stringify (VCallable c) = toString c
-stringify (VInstance i) = LoxClass.className (instanceClass i) ++ " instance"
+isEqual :: Dynamic -> Dynamic -> Bool
+isEqual a b
+  | Just () <- fromDynamic a, Just () <- fromDynamic b = True
+  | Just (da :: Double) <- fromDynamic a, Just db <- fromDynamic b = da == db
+  | Just (ba :: Bool) <- fromDynamic a, Just bb <- fromDynamic b = ba == bb
+  | Just (sa :: String) <- fromDynamic a, Just sb <- fromDynamic b = sa == sb
+  | Just (ca :: MkCallable) <- fromDynamic a, Just (cb :: MkCallable) <- fromDynamic b = callableId ca == callableId cb
+  | otherwise = False
+
+stringify :: Dynamic -> String
+stringify v
+  | Just () <- fromDynamic v = "nil"
+  | Just (b :: Bool) <- fromDynamic v = map toLower (show b)
+  | Just (d :: Double) <- fromDynamic v = case showFFloat Nothing d "" of
+      s | ".0" `isSuffixOf` s -> init (init s)
+        | otherwise -> s
+  | Just (s :: String) <- fromDynamic v = s
+  | Just (c :: MkCallable) <- fromDynamic v = toString c
+  | Just (i :: LoxInstance) <- fromDynamic v = LoxClass.className (instanceClass i) ++ " instance"
 
 data Native = Native { nativeArity :: Int
-                     , nativeFn :: [Value] -> IO Value
+                     , nativeFn :: [Dynamic] -> IO Dynamic
                      , nativeId :: Unique }
 instance Callable Native where
   arity = nativeArity
@@ -226,10 +238,10 @@ instance Callable Native where
   toString _ = "<native fn>"
   callableId = nativeId
 
-nativeClock :: [Value] -> IO Value
+nativeClock :: [Dynamic] -> IO Dynamic
 nativeClock [] = do
   TimeSpec sec nsec <- getTime Monotonic
-  return (VNumber $ fromIntegral sec + fromIntegral nsec / 10^9)
+  return $ toDyn (fromIntegral sec + fromIntegral nsec / 10^9 :: Double)
 
 instance Hashable TT.TokenType
 instance Hashable Literal

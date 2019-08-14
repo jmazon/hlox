@@ -5,7 +5,7 @@ import Data.Unique
 
 import {-# SOURCE #-} Value
 import {-# SOURCE #-} Interpreter
-import {-# SOURCE #-} Class
+import {-# SOURCE #-} LoxClass
 
 class Callable c where
   arity :: c -> Int

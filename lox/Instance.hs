@@ -6,7 +6,7 @@ import qualified Data.HashMap.Strict as H
 import Control.Exception
 
 import Token
-import Class
+import LoxClass
 import Value
 import RuntimeError
 import LoxCallable

@@ -1,6 +1,6 @@
 module Instance where
 
-import {-# SOURCE #-} Class
+import {-# SOURCE #-} LoxClass
 
 data LoxInstance
 

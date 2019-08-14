@@ -1,4 +1,4 @@
-module Class where
+module LoxClass where
 
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
@@ -26,7 +26,7 @@ instance Callable LoxClass where
     let initializer = findMethod c "init"
     maybe (return ()) (flip bind inst >=> \c -> void $ call c i arguments) initializer
     return (VInstance inst)
-  toString c = Class.className c
+  toString c = className c
   callableId = classId
   isClass = Just
 

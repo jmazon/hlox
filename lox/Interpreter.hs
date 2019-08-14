@@ -23,7 +23,7 @@ import Misc
 import Stmt
 import Value
 import Environment
-import Class
+import LoxClass
 import Instance
 import Function
 import ReturnException
@@ -216,7 +216,7 @@ stringify (VNumber n) | ".0" `isSuffixOf` s = init (init s)
   where s = showFFloat Nothing n ""
 stringify (VString s) = s
 stringify (VCallable c) = toString c
-stringify (VInstance i) = Class.className (instanceClass i) ++ " instance"
+stringify (VInstance i) = LoxClass.className (instanceClass i) ++ " instance"
 
 data Native = Native { nativeArity :: Int
                      , nativeFn :: [Value] -> IO Value

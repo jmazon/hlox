@@ -1,4 +1,4 @@
-module Instance where
+module LoxInstance where
 
 import Data.IORef
 import Data.HashMap.Strict (HashMap)

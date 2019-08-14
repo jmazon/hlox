@@ -24,7 +24,7 @@ import Stmt
 import Value
 import Environment
 import LoxClass
-import Instance
+import LoxInstance
 import LoxFunction
 import ReturnException
 import LoxCallable

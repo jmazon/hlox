@@ -11,7 +11,7 @@ import Environment
 import ReturnException
 import {-# SOURCE #-} Interpreter
 import {-# SOURCE #-} Value
-import {-# SOURCE #-} Instance
+import {-# SOURCE #-} LoxInstance
 
 data LoxFunction = LoxFunction { lfunDeclaration :: Stmt, lfunClosure :: Environment, lfunIsInitializer :: Bool, lfunId :: Unique }
 instance Callable LoxFunction where

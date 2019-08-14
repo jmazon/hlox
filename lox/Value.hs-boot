@@ -1,6 +1,6 @@
 module Value where
 
-import {-# SOURCE #-} Instance
+import {-# SOURCE #-} LoxInstance
 import {-# SOURCE #-} LoxCallable
 
 data Value = VNull | VNumber Double | VBool Bool | VString String

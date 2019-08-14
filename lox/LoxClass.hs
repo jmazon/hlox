@@ -9,7 +9,7 @@ import Data.Unique
 import LoxCallable
 import LoxFunction
 import {-# SOURCE #-} Value
-import {-# SOURCE #-} Instance
+import {-# SOURCE #-} LoxInstance
 
 data LoxClass = LoxClass { className :: String
                          , classSuperclass :: Maybe LoxClass

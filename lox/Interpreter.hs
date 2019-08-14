@@ -1,8 +1,8 @@
 {-# LANGUAGE ExistentialQuantification,DeriveGeneric #-}
 module Interpreter where
 
-import Data.Char
-import Data.List
+import Data.Char (toLower)
+import Data.List (isSuffixOf)
 import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
 import Data.Hashable

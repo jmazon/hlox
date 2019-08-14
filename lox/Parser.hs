@@ -4,13 +4,11 @@ import Prelude hiding (or,and)
 import Data.Maybe
 import Data.IORef
 import Data.Unique
-import Control.Monad
 import Control.Monad.Cont
 import Control.Monad.Loops
 import Control.Exception
 
 import Misc
-
 import qualified TokenType as TT
 import TokenType (TokenType)
 import Token

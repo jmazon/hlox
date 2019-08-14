@@ -6,7 +6,6 @@ import System.IO
 import Globals
 import Scanner
 import Parser
-import AstPrinter
 import Interpreter
 import Resolver
 

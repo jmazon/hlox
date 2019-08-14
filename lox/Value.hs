@@ -1,8 +1,6 @@
 {-# LANGUAGE ExistentialQuantification #-}
 module Value where
 
-import {-# SOURCE #-} Interpreter
-import {-# SOURCE #-} Class
 import {-# SOURCE #-} Instance
 import {-# SOURCE #-} Callable
 

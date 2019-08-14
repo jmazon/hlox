@@ -1,4 +1,4 @@
-module Function where
+module LoxFunction where
 
 import Control.Exception
 import Control.Monad

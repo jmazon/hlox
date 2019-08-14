@@ -10,7 +10,7 @@ import LoxClass
 import Value
 import RuntimeError
 import LoxCallable
-import Function
+import LoxFunction
 
 data LoxInstance = LoxInstance { instanceClass :: LoxClass
                                , instanceFields :: IORef (HashMap String Value)}

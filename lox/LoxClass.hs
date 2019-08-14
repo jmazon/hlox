@@ -7,7 +7,7 @@ import Control.Applicative
 import Data.Unique
 
 import LoxCallable
-import Function
+import LoxFunction
 import {-# SOURCE #-} Value
 import {-# SOURCE #-} Instance
 

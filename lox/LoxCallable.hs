@@ -1,5 +1,5 @@
 {-# LANGUAGE ExistentialQuantification #-}
-module Callable where
+module LoxCallable where
 
 import Data.Unique
 

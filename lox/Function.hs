@@ -6,7 +6,7 @@ import Data.Unique
 
 import Stmt
 import Token
-import Callable
+import LoxCallable
 import Environment
 import ReturnException
 import {-# SOURCE #-} Interpreter

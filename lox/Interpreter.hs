@@ -27,7 +27,7 @@ import Class
 import Instance
 import Function
 import ReturnException
-import Callable
+import LoxCallable
 
 data Interpreter = Interpreter { interpreterEnvironment :: Environment
                                , interpreterLocals :: IORef (HashMap Expr Int)}

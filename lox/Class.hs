@@ -6,7 +6,7 @@ import Control.Monad
 import Control.Applicative
 import Data.Unique
 
-import Callable
+import LoxCallable
 import Function
 import {-# SOURCE #-} Value
 import {-# SOURCE #-} Instance

@@ -9,7 +9,7 @@ import Token
 import Class
 import Value
 import RuntimeError
-import Callable
+import LoxCallable
 import Function
 
 data LoxInstance = LoxInstance { instanceClass :: LoxClass

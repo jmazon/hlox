@@ -84,10 +84,8 @@ evaluate i (Unary operator right) = do
   r <- evaluate i right
   case tokenType operator of
     TT.Bang -> return (toDyn (not (isTruthy r)))
-    TT.Minus -> checkNumberOperand operator r >>
-                let Just (n :: Double) = fromDynamic r
-                in return (toDyn (-n))
-    _ -> return (toDyn ())
+    TT.Minus -> toDyn . negate <$> getNumberOperand operator r
+    _ -> return (toDyn ()) -- XXX why?
 evaluate i expr@(Variable name _) = lookupVariable i name expr
 evaluate i expr@(Assign name _ value) = do
   v <- evaluate i value
@@ -99,18 +97,10 @@ evaluate i (Binary left operator right) = do
   l <- evaluate i left
   r <- evaluate i right
   case tokenType operator of
-    TT.Greater -> checkNumberOperands operator l r >>
-                  let Just (vl :: Double) = fromDynamic l; Just vr = fromDynamic r
-                  in return (toDyn (vl > vr))
-    TT.GreaterEqual -> checkNumberOperands operator l r >>
-                       let Just (vl :: Double) = fromDynamic l; Just vr = fromDynamic r
-                       in return (toDyn (vl >= vr))
-    TT.Less -> checkNumberOperands operator l r >>
-               let Just (vl :: Double) = fromDynamic l; Just vr = fromDynamic r
-               in return (toDyn (vl < vr))
-    TT.LessEqual -> checkNumberOperands operator l r >>
-                    let Just (vl :: Double) = fromDynamic l; Just vr = fromDynamic r
-                    in return (toDyn (vl <= vr))
+    TT.Greater -> toDyn . uncurry (>) <$> getNumberOperands operator l r
+    TT.GreaterEqual -> toDyn . uncurry (>=) <$> getNumberOperands operator l r
+    TT.Less -> toDyn .uncurry (<) <$> getNumberOperands operator l r
+    TT.LessEqual -> toDyn . uncurry (<=) <$> getNumberOperands operator l r
 
     TT.BangEqual -> return (toDyn (not (isEqual l r)))
     TT.EqualEqual -> return (toDyn (isEqual l r))
@@ -118,16 +108,10 @@ evaluate i (Binary left operator right) = do
     TT.Plus | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl + vr :: Double))
             | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl ++ vr :: String))
             | otherwise -> throwIO (RuntimeError operator "Operands must be two numbers or two strings.")
-    TT.Minus -> checkNumberOperands operator l r >>
-                let (Just vl) = fromDynamic l; (Just vr) = fromDynamic r
-                in return (toDyn (vl - vr :: Double))
-    TT.Slash -> checkNumberOperands operator l r >>
-                let (Just vl) = fromDynamic l; (Just vr) = fromDynamic r
-                in return (toDyn (vl / vr :: Double))
-    TT.Star -> checkNumberOperands operator l r >>
-               let (Just vl) = fromDynamic l; (Just vr) = fromDynamic r
-               in return (toDyn (vl * vr :: Double))
-    _ -> return (toDyn ())
+    TT.Minus -> toDyn . uncurry (-) <$> getNumberOperands operator l r
+    TT.Slash -> toDyn . uncurry (/) <$> getNumberOperands operator l r
+    TT.Star -> toDyn . uncurry (*) <$> getNumberOperands operator l r
+    _ -> return (toDyn ()) -- XXX why?
 evaluate i (Call callee paren arguments) = do
   c <- evaluate i callee
   as <- mapM (evaluate i) arguments
@@ -196,15 +180,15 @@ lookupVariable i name expr = do
     Just d -> getAt (interpreterEnvironment i) d (tokenLexeme name)
     Nothing -> get globals name
 
-checkNumberOperand :: Token -> Dynamic -> IO ()
-checkNumberOperand operator operand
-  | Just (_ :: Double) <- fromDynamic operand = return ()
+getNumberOperand :: Token -> Dynamic -> IO Double
+getNumberOperand operator operand
+  | Just (d :: Double) <- fromDynamic operand = return d
   | otherwise = throwIO (RuntimeError operator "Operand must be a number.")
 
-checkNumberOperands :: Token -> Dynamic -> Dynamic -> IO ()
-checkNumberOperands operator left right
-  | Just (_ :: Double) <- fromDynamic left
-  , Just (_ :: Double) <- fromDynamic right = return ()
+getNumberOperands :: Token -> Dynamic -> Dynamic -> IO (Double,Double)
+getNumberOperands operator left right
+  | Just (a :: Double) <- fromDynamic left
+  , Just (b :: Double) <- fromDynamic right = return (a,b)
   | otherwise = throwIO (RuntimeError operator "Operands must be numbers.")
 
 isTruthy v | Just () <- fromDynamic v = False

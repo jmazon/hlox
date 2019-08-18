@@ -1,3 +1,4 @@
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Interpreter where
 
@@ -15,6 +16,7 @@ import System.Clock
 import Numeric
 import Data.Unique
 import Data.Dynamic
+import Control.Applicative
 
 import qualified TokenType as TT
 import Token
@@ -35,7 +37,7 @@ data Interpreter = Interpreter { interpreterEnvironment :: Environment
 globals :: Environment
 globals = unsafePerformIO $ do
   g <- newEnvironment
-  define g "clock" . toDyn . MkCallable . Native 0 nativeClock =<< newUnique
+  define g "clock" . toDyn . Native 0 nativeClock =<< newUnique
   return g
 
 newInterpreter :: IO Interpreter
@@ -70,12 +72,11 @@ evaluate i (Set object name value) = do
                         Nothing -> throwIO (RuntimeError name "Only instances have fields.")
 evaluate i expr@(Super _ _ method) = do
   Just distance <- H.lookup expr <$> readIORef (interpreterLocals i)
-  Just super <- fromDynamic <$> getAt (interpreterEnvironment i) distance "super"
-  let Just superclass = isClass (super :: MkCallable)
+  Just superclass <- fromDynamic <$> getAt (interpreterEnvironment i) distance "super"
   -- "this" is always one level nearer than "super"'s environment
   Just object <- fromDynamic <$> getAt (interpreterEnvironment i) (distance - 1) "this"
   case findMethod superclass (tokenLexeme method) of
-    Just m -> toDyn . MkCallable <$> bind m object
+    Just m -> toDyn <$> bind m object
     Nothing -> throwIO (RuntimeError method ("Undefined property '" ++ tokenLexeme method ++ "'."))
 evaluate i expr@(This keyword _) = lookupVariable i keyword expr
 evaluate i (Grouping expr) = evaluate i expr
@@ -130,10 +131,10 @@ evaluate i (Binary left operator right) = do
 evaluate i (Call callee paren arguments) = do
   c <- evaluate i callee
   as <- mapM (evaluate i) arguments
-  case fromDynamic c of
+  case dynToCallable c of
     Nothing -> throwIO $ RuntimeError paren "Can only call functions and classes."
-    Just function -> do
-      when (length arguments /= arity (function :: MkCallable)) $ do
+    Just (IsCallable function) -> do
+      when (length arguments /= arity function) $ do
         throwIO $ RuntimeError paren $ "Expected " ++ show (arity function) ++
                                        " arguments but got " ++
                                        show (length arguments) ++ "."
@@ -144,24 +145,24 @@ execute i (Class name superclass methods) = do
   sc <- sequence $ flip fmap superclass $ \sc -> do
     sc' <- evaluate i sc
     case fromDynamic sc' of
-      Just (cb :: MkCallable) | Just cs <- isClass cb -> return cs
-      _ -> throwIO (RuntimeError (variableName sc) "Superclass must be a class.")
+      Just cs -> return cs
+      Nothing -> throwIO (RuntimeError (variableName sc) "Superclass must be a class.")
   define (interpreterEnvironment i) (tokenLexeme name) (toDyn ())
   environment <- case sc of
     Just sc -> do
       environment <- childEnvironment (interpreterEnvironment i)
-      define environment "super" (toDyn $ MkCallable sc)
+      define environment "super" (toDyn sc)
       return environment
     Nothing -> return (interpreterEnvironment i)
   methods <- fmap H.fromList $ forM methods $ \method -> do
     function <- newFunction method environment (tokenLexeme (functionName method) == "init")
     return (tokenLexeme (functionName method),function)
   klass <- newClass (tokenLexeme name) sc methods
-  assign (interpreterEnvironment i) name (toDyn $ MkCallable klass)
+  assign (interpreterEnvironment i) name (toDyn klass)
 execute i (Expression expr) = void $ evaluate i expr
 execute i f@(Function name _ _) =
   define (interpreterEnvironment i) (tokenLexeme name) .
-    toDyn . MkCallable =<< newFunction f (interpreterEnvironment i) False
+    toDyn =<< newFunction f (interpreterEnvironment i) False
 execute i (If condition thenBranch elseBranch) = do
   c <- isTruthy <$> evaluate i condition
   if c then execute i thenBranch
@@ -215,7 +216,7 @@ isEqual a b
   | Just (da :: Double) <- fromDynamic a, Just db <- fromDynamic b = da == db
   | Just (ba :: Bool) <- fromDynamic a, Just bb <- fromDynamic b = ba == bb
   | Just (sa :: String) <- fromDynamic a, Just sb <- fromDynamic b = sa == sb
-  | Just (ca :: MkCallable) <- fromDynamic a, Just (cb :: MkCallable) <- fromDynamic b = callableId ca == callableId cb
+  | Just (IsCallable ca) <- dynToCallable a, Just (IsCallable cb) <- dynToCallable b = callableId ca == callableId cb
   | otherwise = False
 
 stringify :: Dynamic -> String
@@ -226,7 +227,7 @@ stringify v
       s | ".0" `isSuffixOf` s -> init (init s)
         | otherwise -> s
   | Just (s :: String) <- fromDynamic v = s
-  | Just (c :: MkCallable) <- fromDynamic v = toString c
+  | Just (IsCallable c) <- dynToCallable v = toString c
   | Just (i :: LoxInstance) <- fromDynamic v = LoxClass.className (instanceClass i) ++ " instance"
 
 data Native = Native { nativeArity :: Int
@@ -248,3 +249,10 @@ instance Hashable Literal
 instance Hashable Token
 instance Hashable Unique'
 instance Hashable Expr
+
+data IsCallable = forall c. Callable c => IsCallable c
+
+dynToCallable :: Dynamic -> Maybe IsCallable
+dynToCallable d = IsCallable <$> (fromDynamic d :: Maybe LoxFunction) <|>
+                  IsCallable <$> (fromDynamic d :: Maybe Native) <|>
+                  IsCallable <$> (fromDynamic d :: Maybe LoxClass)

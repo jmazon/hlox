@@ -28,7 +28,6 @@ instance Callable LoxClass where
     return (toDyn inst)
   toString c = className c
   callableId = classId
-  isClass = Just
 
 newClass :: String -> Maybe LoxClass -> HashMap String LoxFunction -> IO LoxClass
 newClass name super methods = LoxClass name super methods <$> newUnique

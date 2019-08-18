@@ -24,7 +24,7 @@ getP i name = do
   case r of Just v -> return v
             Nothing -> do
               case findMethod (instanceClass i) (tokenLexeme name) of
-                Just m -> toDyn . MkCallable <$> bind m i
+                Just m -> toDyn <$> bind m i
                 Nothing -> throwIO (RuntimeError name ("Undefined property '" ++ tokenLexeme name ++ "'."))
 
 setP :: LoxInstance -> Token -> Dynamic -> IO ()

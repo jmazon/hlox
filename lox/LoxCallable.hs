@@ -6,7 +6,7 @@ import Data.Dynamic
 
 import {-# SOURCE #-} Interpreter
 
-class Callable c where
+class LoxCallable c where
   arity :: c -> Int
   call :: c -> Interpreter -> [Dynamic] -> IO Dynamic
   toString :: c -> String

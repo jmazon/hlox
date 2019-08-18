@@ -233,7 +233,7 @@ stringify v
 data Native = Native { nativeArity :: Int
                      , nativeFn :: [Dynamic] -> IO Dynamic
                      , nativeId :: Unique }
-instance Callable Native where
+instance LoxCallable Native where
   arity = nativeArity
   call n _ vs = (nativeFn n) vs
   toString _ = "<native fn>"
@@ -250,7 +250,7 @@ instance Hashable Token
 instance Hashable Unique'
 instance Hashable Expr
 
-data IsCallable = forall c. Callable c => IsCallable c
+data IsCallable = forall c. LoxCallable c => IsCallable c
 
 dynToCallable :: Dynamic -> Maybe IsCallable
 dynToCallable d = IsCallable <$> (fromDynamic d :: Maybe LoxFunction) <|>

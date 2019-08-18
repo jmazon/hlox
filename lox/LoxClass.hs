@@ -16,7 +16,7 @@ data LoxClass = LoxClass { className :: String
                          , classMethods :: HashMap String LoxFunction
                          , classId :: Unique }
 
-instance Callable LoxClass where
+instance LoxCallable LoxClass where
   arity c =  do
     case findMethod c "init" of
       Just initializer -> arity initializer

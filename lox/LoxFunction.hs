@@ -14,7 +14,7 @@ import {-# SOURCE #-} Interpreter
 import {-# SOURCE #-} LoxInstance
 
 data LoxFunction = LoxFunction { lfunDeclaration :: Stmt, lfunClosure :: Environment, lfunIsInitializer :: Bool, lfunId :: Unique }
-instance Callable LoxFunction where
+instance LoxCallable LoxFunction where
   arity (LoxFunction (Function _ params _) _ _ _) = length params
   call (LoxFunction (Function name params body) closure isInitializer _) i arguments = do
     environment <- childEnvironment closure

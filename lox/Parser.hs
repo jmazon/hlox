@@ -8,21 +8,24 @@ import Control.Monad.Cont
 import Control.Monad.Loops
 import Control.Exception
 
-import Misc
 import qualified TokenType as TT
 import TokenType (TokenType)
 import Token
 import Expr
 import Stmt
 
+data ParseError = ParseError deriving Show
+instance Exception ParseError
+
 data Parser = Parser {
-    parserTokens :: [Token]
+    parserError :: Token -> String -> IO ()
+  , parserTokens :: [Token]
   , parserCurrent :: IORef Int
   }
 
-newParser :: [Token] -> IO Parser
-newParser tokens = do
-  Parser tokens <$> newIORef 0
+newParser :: (Token -> String -> IO ()) -> [Token] -> IO Parser
+newParser tokenError tokens = do
+  Parser tokenError tokens <$> newIORef 0
 
 parse :: Parser -> IO [Stmt]
 parse p = do
@@ -136,7 +139,7 @@ function p kind = do
   consume p TT.LeftParen $ "Expect '(' after " ++ kind ++ " name."
 
   let f i = flip (ifM (match p [TT.Comma])) (return Nothing) $ do
-        when (i >= 255) $ void $ flip tokenError "Cannot have more than 255 parameters." =<< peek p
+        when (i >= 255) $ void $ parseError p "Cannot have more than 255 parameters." =<< peek p
         Just . flip (,) (i+1) <$> c
       c = consume p TT.Identifier "Expect parameter name."
   parameters <- ifM (not <$> check p TT.RightParen)
@@ -168,7 +171,7 @@ assignment p = do
                      return (Assign name (Unique' u) value)
                    Get object name -> do
                      return (Set object name value)
-                   _ -> tokenError equals "Invalid assignment target."
+                   _ -> parseError p "Invalid assignment target." equals
                         >> return (Literal LNull)
     else return expr
 
@@ -201,7 +204,7 @@ unary p = do
 finishCall :: Parser -> Expr -> IO Expr
 finishCall p callee = do
   let f i = flip (ifM (match p [TT.Comma])) (return Nothing) $ do
-        when (i >= 255) $ void $ flip tokenError "Cannot have more than 255 arguments." =<< peek p
+        when (i >= 255) $ void $ parseError p "Cannot have more than 255 arguments." =<< peek p
         Just . flip (,) (i+1) <$> expression p
   arguments <- ifM (not <$> check p TT.RightParen)
                  (liftM2 (:) (expression p) (unfoldrM f 1))
@@ -240,7 +243,7 @@ primary p = caseM
         expr <- expression p
         consume p TT.RightParen "Expect ')' after expression."
         return (Grouping expr)) ]
-  (throwIO =<< flip tokenError "Expect expression." =<< peek p)
+  (throwIO =<< parseError p "Expect expression." =<< peek p)
 
 caseM :: Monad m => [(m Bool,m a)] -> m a -> m a
 caseM cs def = go cs where
@@ -269,7 +272,7 @@ match p = anyM f where
 consume :: Parser -> TokenType -> String -> IO Token
 consume p tt msg = do
   c <- check p tt
-  if c then void (advance p) else throwIO =<< flip tokenError msg =<< peek p
+  if c then void (advance p) else throwIO =<< parseError p msg =<< peek p
   previous p
 
 check :: Parser -> TokenType -> IO Bool
@@ -291,6 +294,11 @@ peek p = (parserTokens p !!) <$> readIORef (parserCurrent p)
 
 previous :: Parser -> IO Token
 previous p = (parserTokens p !!) . pred <$> readIORef (parserCurrent p)
+
+parseError :: Parser -> String -> Token -> IO ParseError
+parseError p msg tok = do
+  parserError p tok msg
+  return ParseError
 
 synchronize :: Parser -> IO ()
 synchronize p = do

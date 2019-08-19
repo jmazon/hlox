@@ -22,7 +22,6 @@ import qualified TokenType as TT
 import Token
 import Expr
 import RuntimeError
-import Misc
 import Stmt
 import Environment
 import LoxClass
@@ -43,8 +42,8 @@ globals = unsafePerformIO $ do
 newInterpreter :: IO Interpreter
 newInterpreter = Interpreter globals <$> newIORef H.empty
 
-interpret :: Interpreter -> [Stmt] -> IO ()
-interpret i statements = do
+interpret :: (RuntimeError -> IO ()) -> Interpreter -> [Stmt] -> IO ()
+interpret runtimeError i statements = do
   (mapM_ (execute i) statements) `catch`
     (\e -> runtimeError (e :: RuntimeError))
 

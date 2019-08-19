@@ -12,20 +12,20 @@ import Token
 import Expr
 import Stmt
 import {-# SOURCE #-} Interpreter
-import Misc
 
 data FunctionType = FT_None | FT_Function | FT_Method | FT_Initializer
 data ClassType = CT_None | CT_Class | CT_Subclass
 
 data Resolver = Resolver
-                { resolverInterpreter :: Interpreter
+                { resolverError :: Token -> String -> IO ()
+                , resolverInterpreter :: Interpreter
                 , resolverScopes :: Stack (HashMap String Bool)
                 , resolverCurrentFunction :: IORef FunctionType
                 , resolverCurrentClass :: IORef ClassType }
 
-newResolver :: Interpreter -> IO Resolver
-newResolver i = liftM3 (Resolver i)
-                  emptyStack (newIORef FT_None) (newIORef CT_None)
+newResolver :: (Token -> String -> IO a) -> Interpreter -> IO Resolver
+newResolver tokenError i = liftM3 (Resolver (fmap void . tokenError) i)
+                             emptyStack (newIORef FT_None) (newIORef CT_None)
 
 resolveS :: Resolver -> Stmt -> IO ()
 resolveS r (Block statements) = do
@@ -39,7 +39,7 @@ resolveS r (Class name superclass methods) = do
   define r name
   sequence_ $ flip fmap superclass $ \sc ->
     when (tokenLexeme name == tokenLexeme (variableName sc)) $
-      void $ tokenError (variableName sc) "A class cannot inherit from itself."
+      resolverError r (variableName sc) "A class cannot inherit from itself."
   sequence_ $ (writeIORef (resolverCurrentClass r) CT_Subclass) <$ superclass
   sequence_ $ resolveE r <$> superclass
   sequence_ $ flip fmap superclass $ \sc -> do
@@ -69,10 +69,10 @@ resolveS r (Print expression) = resolveE r expression
 resolveS r (Return keyword value) = do
   cf <- readIORef (resolverCurrentFunction r)
   case cf of
-    FT_None -> void $ tokenError keyword "Cannot return from top-level code."
+    FT_None -> resolverError r keyword "Cannot return from top-level code."
     _ -> return ()
   when (isJust value) $ do
-    case cf of FT_Initializer -> void $ tokenError keyword "Cannot return a value from an initializer."
+    case cf of FT_Initializer -> resolverError r keyword "Cannot return a value from an initializer."
                _ -> return ()
     resolveE r (fromJust value)
 resolveS r (Var name initializer) = do
@@ -105,20 +105,20 @@ resolveE r (Set object _ value) = do
 resolveE r expr@(Super keyword _ method) = do
   cc <- readIORef (resolverCurrentClass r)
   case cc of
-    CT_None -> void $ tokenError keyword "Cannot use 'super' outside of a class."
+    CT_None -> resolverError r keyword "Cannot use 'super' outside of a class."
     _ -> case cc of
       CT_Subclass -> return ()
-      _ -> void $ tokenError keyword "Cannot use 'super' in a class with no superclass."
+      _ -> resolverError r keyword "Cannot use 'super' in a class with no superclass."
   resolveLocal r expr keyword
 resolveE r expr@(This keyword _) = do
   cc <- readIORef (resolverCurrentClass r)
-  case cc of CT_None -> void $ tokenError keyword "Cannot use 'this' outside of a class."
+  case cc of CT_None -> resolverError r keyword "Cannot use 'this' outside of a class."
              _ -> resolveLocal r expr keyword
 resolveE r (Unary _ right) = resolveE r right
 resolveE r expr@(Variable name _) = do
   whenM (not <$> isEmpty (resolverScopes r)) $
     whenM ((== Just False) . H.lookup (tokenLexeme name) <$> peek (resolverScopes r)) $ do
-    void $ tokenError name "Cannot read local variable in its own initializer."
+    resolverError r name "Cannot read local variable in its own initializer."
   resolveLocal r expr name
 
 resolveFunction :: Resolver -> Stmt -> FunctionType -> IO ()
@@ -143,7 +143,7 @@ declare :: Resolver -> Token -> IO ()
 declare r name = unlessM (isEmpty (resolverScopes r)) $ do
   scope <- peek (resolverScopes r)
   if tokenLexeme name `H.member` scope then
-    void $ tokenError name "Variable with this name already declared in this scope."
+    resolverError r name "Variable with this name already declared in this scope."
     else do
     pop (resolverScopes r)
     push (resolverScopes r) (H.insert (tokenLexeme name) False scope)

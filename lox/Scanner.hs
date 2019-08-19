@@ -10,22 +10,22 @@ import Data.HashMap.Strict (HashMap)
 import Token
 import qualified TokenType as TT
 import TokenType (TokenType)
-import Misc
 
 data Scanner = Scanner {
-    scannerSource :: String
+    scannerError :: Int -> String -> IO ()
+  , scannerSource :: String
   , scannerTokens :: IORef [Token]
   , scannerStart :: IORef Int
   , scannerCurrent :: IORef Int
   , scannerLine :: IORef Int
   }
 
-newScanner :: String -> IO Scanner
-newScanner source = liftM4 (Scanner source)
-                      (newIORef [])
-                      (newIORef 0)
-                      (newIORef 0)
-                      (newIORef 1)
+newScanner :: (Int -> String -> IO ()) -> String -> IO Scanner
+newScanner err source = liftM4 (Scanner err source)
+                          (newIORef [])
+                          (newIORef 0)
+                          (newIORef 0)
+                          (newIORef 1)
 
 scanTokens :: Scanner -> IO [Token]
 scanTokens s = do
@@ -90,7 +90,7 @@ scanToken s = do
               if isDigit c then number s
                 else if isAlpha c then identifier s else
                 readIORef (scannerLine s) >>= \l ->
-                loxError l "Unexpected character."
+                scannerError s l "Unexpected character."
 
 identifier :: Scanner -> IO ()
 identifier s = do
@@ -119,7 +119,7 @@ number s = do
       (readIORef (scannerStart s))
       (readIORef (scannerCurrent s))
 
-string :: Scanner -> IO ()
+string :: Scanner ->  IO ()
 string s = do
   while (andM [(/= '"') <$> peek s
               , not <$> isAtEnd s]) $ do
@@ -131,7 +131,7 @@ string s = do
   ae <- isAtEnd s
   if ae then do
     l <- readIORef (scannerLine s)
-    loxError l "Unterminated string."
+    scannerError s l "Unterminated string."
       else do
 
     -- The closing "

@@ -12,7 +12,7 @@ import Control.Monad
 import Control.Monad.Loops
 import Control.Exception hiding (evaluate)
 import System.IO.Unsafe
-import System.Clock
+import System.Clock (TimeSpec(TimeSpec),getTime,Clock(Monotonic))
 import Numeric
 import Data.Unique
 import Data.Dynamic
@@ -34,6 +34,7 @@ data Interpreter = Interpreter { interpreterEnvironment :: Environment
                                , interpreterLocals :: IORef (HashMap Expr Int)}
 
 globals :: Environment
+{-# NOINLINE globals #-}
 globals = unsafePerformIO $ do
   g <- newEnvironment
   define g "clock" . toDyn . Native 0 nativeClock =<< newUnique
@@ -43,9 +44,8 @@ newInterpreter :: IO Interpreter
 newInterpreter = Interpreter globals <$> newIORef H.empty
 
 interpret :: (RuntimeError -> IO ()) -> Interpreter -> [Stmt] -> IO ()
-interpret runtimeError i statements = do
-  (mapM_ (execute i) statements) `catch`
-    (\e -> runtimeError (e :: RuntimeError))
+interpret runtimeError i statements =
+  mapM_ (execute i) statements `catch` runtimeError
 
 evaluate :: Interpreter -> Expr -> IO Dynamic
 evaluate _ (Literal LNull) = return (toDyn ())
@@ -117,7 +117,7 @@ evaluate i (Call callee paren arguments) = do
   case dynToCallable c of
     Nothing -> throwIO $ RuntimeError paren "Can only call functions and classes."
     Just (IsCallable function) -> do
-      when (length arguments /= arity function) $ do
+      when (length arguments /= arity function) $
         throwIO $ RuntimeError paren $ "Expected " ++ show (arity function) ++
                                        " arguments but got " ++
                                        show (length arguments) ++ "."
@@ -125,22 +125,22 @@ evaluate i (Call callee paren arguments) = do
 
 execute :: Interpreter -> Stmt -> IO ()
 execute i (Class name superclass methods) = do
-  sc <- sequence $ flip fmap superclass $ \sc -> do
-    sc' <- evaluate i sc
-    case fromDynamic sc' of
-      Just cs -> return cs
-      Nothing -> throwIO (RuntimeError (variableName sc) "Superclass must be a class.")
+  sc <- sequence $ flip fmap superclass $ \scVar -> do
+    scVal <- evaluate i scVar
+    case fromDynamic scVal of
+      Just scClass -> return scClass
+      Nothing -> throwIO (RuntimeError (variableName scVar) "Superclass must be a class.")
   define (interpreterEnvironment i) (tokenLexeme name) (toDyn ())
   environment <- case sc of
-    Just sc -> do
+    Just sc' -> do
       environment <- childEnvironment (interpreterEnvironment i)
-      define environment "super" (toDyn sc)
+      define environment "super" (toDyn sc')
       return environment
     Nothing -> return (interpreterEnvironment i)
-  methods <- fmap H.fromList $ forM methods $ \method -> do
+  methods' <- fmap H.fromList $ forM methods $ \method -> do
     function <- newFunction method environment (tokenLexeme (functionName method) == "init")
     return (tokenLexeme (functionName method),function)
-  klass <- newClass (tokenLexeme name) sc methods
+  klass <- newClass (tokenLexeme name) sc methods'
   assign (interpreterEnvironment i) name (toDyn klass)
 execute i (Expression expr) = void $ evaluate i expr
 execute i f@(Function name _ _) =
@@ -159,11 +159,10 @@ execute i (Stmt.Return _ value) = do
 execute i (Var name initializer) = do
   value <- maybe (return (toDyn ())) (evaluate i) initializer
   define (interpreterEnvironment i) (tokenLexeme name) value
-execute i (While condition body) = do
-  whileM_ (isTruthy <$> evaluate i condition)
-    (execute i body)
-execute i b@(Block statements) = executeBlock i statements =<<
-                                   childEnvironment (interpreterEnvironment i)
+execute i (While condition body) =
+  whileM_ (isTruthy <$> evaluate i condition) $ execute i body
+execute i (Block statements) = executeBlock i statements =<<
+                                 childEnvironment (interpreterEnvironment i)
 
 executeBlock :: Interpreter -> [Stmt] -> Environment -> IO ()
 executeBlock i statements environment =
@@ -190,6 +189,7 @@ getNumberOperands operator left right
   , Just (b :: Double) <- fromDynamic right = return (a,b)
   | otherwise = throwIO (RuntimeError operator "Operands must be numbers.")
 
+isTruthy :: Dynamic -> Bool
 isTruthy v | Just () <- fromDynamic v = False
 isTruthy v = fromDyn v True
 
@@ -212,20 +212,22 @@ stringify v
   | Just (s :: String) <- fromDynamic v = s
   | Just (IsCallable c) <- dynToCallable v = toString c
   | Just (i :: LoxInstance) <- fromDynamic v = LoxClass.className (instanceClass i) ++ " instance"
+  | otherwise = error "Internal error: unknown type to stringify" -- XXX
 
 data Native = Native { nativeArity :: Int
                      , nativeFn :: [Dynamic] -> IO Dynamic
                      , nativeId :: Unique }
 instance LoxCallable Native where
   arity = nativeArity
-  call n _ vs = (nativeFn n) vs
+  call n _ = nativeFn n
   toString _ = "<native fn>"
   callableId = nativeId
 
 nativeClock :: [Dynamic] -> IO Dynamic
 nativeClock [] = do
   TimeSpec sec nsec <- getTime Monotonic
-  return $ toDyn (fromIntegral sec + fromIntegral nsec / 10^9 :: Double)
+  return $ toDyn (fromIntegral sec + fromIntegral nsec / 1000000000 :: Double)
+nativeClock _ = error "Internal error: clock called with arguments" -- XXX
 
 instance Hashable TT.TokenType
 instance Hashable Literal

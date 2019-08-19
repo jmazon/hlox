@@ -13,7 +13,7 @@ data Token = Token {
   } deriving (Eq,Generic)
 
 instance Show Token where
-  show (Token t lex lit _) = show t ++ " " ++ lex ++ " " ++ show lit
+  show (Token t lx lit _) = show t ++ " " ++ lx ++ " " ++ show lit
 
 data Literal = LNull | LString String | LNumber Double | LBool Bool deriving (Eq,Generic)
 instance Show Literal where

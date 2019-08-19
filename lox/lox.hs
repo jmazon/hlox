@@ -53,16 +53,14 @@ run lox interpreter source = do
   tokens <- scanTokens scanner
   parser <- newParser (tokenError lox) tokens
   statements <- parse parser
-  he <- readIORef (hadError lox)
-  unless he $ do
+  unlessM (readIORef (hadError lox)) $ do
     resolver <- newResolver (tokenError lox) interpreter
-    mapM (resolveS resolver) statements
-    he <- readIORef (hadError lox)
-    unless he $ interpret (runtimeError lox) interpreter statements
+    mapM_ (resolveS resolver) statements
+    unlessM (readIORef (hadError lox)) $
+      interpret (runtimeError lox) interpreter statements
 
 scanError :: Lox -> Int -> String -> IO ()
-scanError lox line message = do
-  report lox line "" message
+scanError lox line message = report lox line "" message
 
 report :: Lox -> Int -> String -> String -> IO ()
 report lox line location message = do
@@ -71,7 +69,7 @@ report lox line location message = do
   writeIORef (hadError lox) True
 
 tokenError :: Lox -> Token -> String -> IO ()
-tokenError lox t m = do
+tokenError lox t m =
   if tokenType t == TT.Eof
     then report lox (tokenLine t) " at end" m
     else report lox (tokenLine t) (" at '" ++ tokenLexeme t ++ "'") m

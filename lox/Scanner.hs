@@ -6,6 +6,7 @@ import Control.Monad
 import Control.Monad.Loops
 import qualified Data.HashMap.Strict as M
 import Data.HashMap.Strict (HashMap)
+import Data.Char (isAsciiLower,isAsciiUpper)
 
 import Token
 import qualified TokenType as TT
@@ -29,7 +30,7 @@ newScanner err source = liftM4 (Scanner err source)
 
 scanTokens :: Scanner -> IO [Token]
 scanTokens s = do
-  while (not <$> isAtEnd s) $ do
+  whileM_ (not <$> isAtEnd s) $ do
     writeIORef (scannerStart s) =<< readIORef (scannerCurrent s)
     scanToken s
   l <- readIORef (scannerLine s)
@@ -39,21 +40,23 @@ scanTokens s = do
 isAtEnd :: Scanner -> IO Bool
 isAtEnd s = (>= length (scannerSource s)) <$>readIORef (scannerCurrent s)
 
+advance_ :: Scanner -> IO ()
+advance_ s = modifyIORef (scannerCurrent s) succ
 advance :: Scanner -> IO Char
 advance s = do
-  modifyIORef (scannerCurrent s) succ
+  advance_ s
   (scannerSource s !!) . pred <$> readIORef (scannerCurrent s)
 
 addToken :: Scanner -> TT.TokenType -> IO ()
-addToken s tokenType = addTokenLit s tokenType LNull
+addToken s tokType = addTokenLit s tokType LNull
 
 addTokenLit :: Scanner -> TT.TokenType -> Literal -> IO ()
-addTokenLit s tokenType literal = do
+addTokenLit s tokType literal = do
   text <- liftM2 (substr (scannerSource s))
             (readIORef (scannerStart s))
             (readIORef (scannerCurrent s))
   l <- readIORef (scannerLine s)
-  modifyIORef (scannerTokens s) (++ [Token tokenType text literal l])
+  modifyIORef (scannerTokens s) (++ [Token tokType text literal l])
   
 scanToken :: Scanner -> IO ()
 scanToken s = do
@@ -74,9 +77,9 @@ scanToken s = do
             '>' -> addToken s . bool TT.Greater TT.GreaterEqual =<< match s '='
             '/' -> do
               sl <- match s '/'
-              if sl then while (andM [(/= '\n') <$> peek s,
-                                      not <$> isAtEnd s])
-                           (advance s)
+              if sl then whileM_ (andM [(/= '\n') <$> peek s,
+                                        not <$> isAtEnd s])
+                           (advance_ s)
                 else addToken s TT.Slash
             -- Ignore whitespace.
             ' ' -> return ()
@@ -86,15 +89,14 @@ scanToken s = do
 
             '"' -> string s
 
-            _ -> do
-              if isDigit c then number s
-                else if isAlpha c then identifier s else
-                readIORef (scannerLine s) >>= \l ->
-                scannerError s l "Unexpected character."
+            _ | isDigit c -> number s
+              | isAlpha c -> identifier s
+              | otherwise -> readIORef (scannerLine s) >>= \l ->
+                             scannerError s l "Unexpected character."
 
 identifier :: Scanner -> IO ()
 identifier s = do
-  while (isAlphaNumeric <$> peek s) (advance s)
+  whileM_ (isAlphaNumeric <$> peek s) (advance_ s)
 
   -- See if the identifier is a reserved word
   text <- liftM2 (substr (scannerSource s))
@@ -104,15 +106,15 @@ identifier s = do
 
 number :: Scanner -> IO ()
 number s = do
-  while (isDigit <$> peek s) (advance s)
+  whileM_ (isDigit <$> peek s) (advance_ s)
 
   -- Look for a fractional part
   f <- andM [ (== '.') <$> peek s
             , isDigit <$> peekNext s ]
   when f $ do
     -- Consume the "."
-    advance s
-    while (isDigit <$> peek s) (advance s)
+    advance_ s
+    whileM_ (isDigit <$> peek s) (advance_ s)
 
   addTokenLit s TT.Number . LNumber . read =<<
     liftM2 (substr (scannerSource s))
@@ -121,11 +123,11 @@ number s = do
 
 string :: Scanner ->  IO ()
 string s = do
-  while (andM [(/= '"') <$> peek s
-              , not <$> isAtEnd s]) $ do
+  whileM_ (andM [(/= '"') <$> peek s
+                , not <$> isAtEnd s]) $ do
     nl <- (== '\n') <$> peek s
     when nl $ modifyIORef (scannerLine s) succ
-    advance s
+    advance_ s
 
   -- Unterminated string
   ae <- isAtEnd s
@@ -135,7 +137,7 @@ string s = do
       else do
 
     -- The closing "
-    advance s
+    advance_ s
 
     -- Trim the surrounding quotes
     value <- liftM2 (substr (scannerSource s))
@@ -163,25 +165,18 @@ peek s = do
 peekNext :: Scanner -> IO Char
 peekNext s = do
   c <- readIORef (scannerCurrent s)
-  if (c + 1 >= length (scannerSource s))
+  if c + 1 >= length (scannerSource s)
     then return '\0'
     else return (scannerSource s !! (c + 1))
 
 isAlpha :: Char -> Bool
-isAlpha c = c >= 'a' && c <= 'z' ||
-            c >= 'A' && c <= 'Z' ||
-            c == '_'
+isAlpha c = isAsciiLower c || isAsciiUpper c || c == '_'
 
 isAlphaNumeric :: Char -> Bool
 isAlphaNumeric c = isAlpha c || isDigit c
             
 isDigit :: Char -> Bool
 isDigit c = c >= '0' && c <= '9'
-
-while :: Monad m => m Bool -> m a -> m ()
-while c a = go where
-  go = do b <- c
-          when b (a >> go)
 
 substr :: String -> Int -> Int -> String
 substr str start end = take (end-start) (drop start str)

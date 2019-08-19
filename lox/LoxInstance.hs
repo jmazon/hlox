@@ -9,7 +9,6 @@ import Data.Dynamic
 import Token
 import LoxClass
 import RuntimeError
-import LoxCallable
 import LoxFunction
 
 data LoxInstance = LoxInstance { instanceClass :: LoxClass
@@ -22,11 +21,10 @@ getP :: LoxInstance -> Token -> IO Dynamic
 getP i name = do
   r <- H.lookup (tokenLexeme name) <$> readIORef (instanceFields i)
   case r of Just v -> return v
-            Nothing -> do
-              case findMethod (instanceClass i) (tokenLexeme name) of
-                Just m -> toDyn <$> bind m i
-                Nothing -> throwIO (RuntimeError name ("Undefined property '" ++ tokenLexeme name ++ "'."))
+            Nothing -> case findMethod (instanceClass i) (tokenLexeme name) of
+              Just m -> toDyn <$> bind m i
+              Nothing -> throwIO (RuntimeError name ("Undefined property '" ++ tokenLexeme name ++ "'."))
 
 setP :: LoxInstance -> Token -> Dynamic -> IO ()
-setP i name value = do
+setP i name value =
   modifyIORef (instanceFields i) (H.insert (tokenLexeme name) value)

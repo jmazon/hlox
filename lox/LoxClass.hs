@@ -17,16 +17,15 @@ data LoxClass = LoxClass { className :: String
                          , classId :: Unique }
 
 instance LoxCallable LoxClass where
-  arity c =  do
-    case findMethod c "init" of
-      Just initializer -> arity initializer
-      Nothing -> 0
+  arity c = case findMethod c "init" of
+    Just initializer -> arity initializer
+    Nothing -> 0
   call c i arguments = do
     inst <- newInstance c
     let initializer = findMethod c "init"
-    maybe (return ()) (flip bind inst >=> \c -> void $ call c i arguments) initializer
+    maybe (return ()) (flip bind inst >=> \c' -> void $ call c' i arguments) initializer
     return (toDyn inst)
-  toString c = className c
+  toString = className
   callableId = classId
 
 newClass :: String -> Maybe LoxClass -> HashMap String LoxFunction -> IO LoxClass

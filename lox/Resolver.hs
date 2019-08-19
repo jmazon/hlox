@@ -11,7 +11,7 @@ import Control.Monad
 import Token
 import Expr
 import Stmt
-import {-# SOURCE #-} Interpreter
+import Interpreter
 
 data FunctionType = FT_None | FT_Function | FT_Method | FT_Initializer
 data ClassType = CT_None | CT_Class | CT_Subclass
@@ -40,9 +40,9 @@ resolveS r (Class name superclass methods) = do
   sequence_ $ flip fmap superclass $ \sc ->
     when (tokenLexeme name == tokenLexeme (variableName sc)) $
       resolverError r (variableName sc) "A class cannot inherit from itself."
-  sequence_ $ (writeIORef (resolverCurrentClass r) CT_Subclass) <$ superclass
+  sequence_ $ writeIORef (resolverCurrentClass r) CT_Subclass <$ superclass
   sequence_ $ resolveE r <$> superclass
-  sequence_ $ flip fmap superclass $ \sc -> do
+  sequence_ $ superclass $> do
     beginScope r
     s <- pop (resolverScopes r)
     push (resolverScopes r) (H.insert "super" True s)
@@ -102,7 +102,7 @@ resolveE r (Logical left _ right) = do
 resolveE r (Set object _ value) = do
   resolveE r value
   resolveE r object
-resolveE r expr@(Super keyword _ method) = do
+resolveE r expr@(Super keyword _ _) = do
   cc <- readIORef (resolverCurrentClass r)
   case cc of
     CT_None -> resolverError r keyword "Cannot use 'super' outside of a class."
@@ -117,8 +117,9 @@ resolveE r expr@(This keyword _) = do
 resolveE r (Unary _ right) = resolveE r right
 resolveE r expr@(Variable name _) = do
   whenM (not <$> isEmpty (resolverScopes r)) $
-    whenM ((== Just False) . H.lookup (tokenLexeme name) <$> peek (resolverScopes r)) $ do
-    resolverError r name "Cannot read local variable in its own initializer."
+    whenM ((== Just False) . H.lookup (tokenLexeme name) <$>
+           peek (resolverScopes r)) $
+      resolverError r name "Cannot read local variable in its own initializer."
   resolveLocal r expr name
 
 resolveFunction :: Resolver -> Stmt -> FunctionType -> IO ()
@@ -144,9 +145,9 @@ declare r name = unlessM (isEmpty (resolverScopes r)) $ do
   scope <- peek (resolverScopes r)
   if tokenLexeme name `H.member` scope then
     resolverError r name "Variable with this name already declared in this scope."
-    else do
+  else do
     pop (resolverScopes r)
-    push (resolverScopes r) (H.insert (tokenLexeme name) False scope)
+    push (resolverScopes r) $ H.insert (tokenLexeme name) False scope
 
 define :: Resolver -> Token -> IO ()
 define r name = unlessM (isEmpty (resolverScopes r)) $ do

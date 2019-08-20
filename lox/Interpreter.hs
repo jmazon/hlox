@@ -1,12 +1,11 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Interpreter (Interpreter(Interpreter),newInterpreter,interpret,executeBlock,resolveI) where
+module Interpreter (Interpreter(Interpreter),newInterpreter,interpret,executeBlock,resolveLocals) where
 
 import Data.Char (toLower)
-import Data.List (isSuffixOf)
+import Data.List (isSuffixOf,foldl')
 import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
-import Data.Hashable
 import Data.IORef
 import Control.Monad
 import Control.Monad.Loops
@@ -19,7 +18,7 @@ import Data.Dynamic
 import Control.Applicative
 
 import qualified TokenType as TT
-import Token (Token,tokenType,tokenLexeme,Unique',Literal(LNull,LBool,LNumber,LString))
+import Token (Token,tokenType,tokenLexeme,Literal(LNull,LBool,LNumber,LString))
 import Expr
 import RuntimeError (RuntimeError(RuntimeError))
 import Stmt
@@ -168,8 +167,9 @@ executeBlock :: Interpreter -> [Stmt] -> Environment -> IO ()
 executeBlock i statements environment =
   forM_ statements $ execute i { interpreterEnvironment = environment }
 
-resolveI :: Interpreter -> Expr -> Int -> IO ()
-resolveI i expr depth = modifyIORef (interpreterLocals i) (H.insert expr depth)
+resolveLocals :: Interpreter -> [(Expr,Int)] -> IO ()
+resolveLocals i kvs = modifyIORef (interpreterLocals i) $
+                      \h0 -> foldl' (\h (k,v) -> H.insert k v h) h0 kvs
 
 lookupVariable :: Interpreter -> Token -> Expr -> IO Dynamic
 lookupVariable i name expr = do
@@ -228,12 +228,6 @@ nativeClock [] = do
   TimeSpec sec nsec <- getTime Monotonic
   return $ toDyn (fromIntegral sec + fromIntegral nsec / 1000000000 :: Double)
 nativeClock _ = error "Internal error: clock called with arguments" -- XXX
-
-instance Hashable TT.TokenType
-instance Hashable Literal
-instance Hashable Token
-instance Hashable Unique'
-instance Hashable Expr
 
 data IsCallable = forall c. LoxCallable c => IsCallable c
 

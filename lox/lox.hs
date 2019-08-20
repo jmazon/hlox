@@ -6,8 +6,8 @@ import Data.IORef
 
 import Scanner (newScanner,scanTokens)
 import Parser (newParser,parse)
-import Interpreter (Interpreter,newInterpreter,interpret)
-import Resolver (newResolver,resolveS,unlessM)
+import Interpreter (Interpreter,newInterpreter,interpret,resolveLocals)
+import Resolver (newResolver,resolve,unlessM)
 import Token (Token,tokenType,tokenLine,tokenLexeme)
 import qualified TokenType as TT (TokenType(Eof))
 import RuntimeError (RuntimeError(RuntimeError))
@@ -54,8 +54,8 @@ run lox interpreter source = do
   parser <- newParser (tokenError lox) tokens
   statements <- parse parser
   unlessM (readIORef (hadError lox)) $ do
-    resolver <- newResolver (tokenError lox) interpreter
-    mapM_ (resolveS resolver) statements
+    resolver <- newResolver (tokenError lox)
+    resolveLocals interpreter =<< resolve resolver statements
     unlessM (readIORef (hadError lox)) $
       interpret (runtimeError lox) interpreter statements
 

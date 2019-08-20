@@ -1,4 +1,4 @@
-module Resolver (newResolver,resolveS,unlessM) where
+module Resolver (newResolver,resolve,unlessM) where
 
 import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
@@ -11,21 +11,26 @@ import Control.Monad
 import Token (Token,tokenLexeme)
 import Expr
 import Stmt
-import Interpreter (Interpreter,resolveI)
 
 data FunctionType = FT_None | FT_Function | FT_Method | FT_Initializer
 data ClassType = CT_None | CT_Class | CT_Subclass
 
 data Resolver = Resolver
                 { resolverError :: Token -> String -> IO ()
-                , resolverInterpreter :: Interpreter
+                , resolverLocals :: IORef [(Expr,Int)]
                 , resolverScopes :: Stack (HashMap String Bool)
                 , resolverCurrentFunction :: IORef FunctionType
                 , resolverCurrentClass :: IORef ClassType }
 
-newResolver :: (Token -> String -> IO a) -> Interpreter -> IO Resolver
-newResolver tokenError i = liftM3 (Resolver (fmap void . tokenError) i)
-                             emptyStack (newIORef FT_None) (newIORef CT_None)
+resolve :: Resolver -> [Stmt] -> IO [(Expr,Int)]
+resolve r statements = do
+  mapM_ (resolveS r) statements
+  readIORef (resolverLocals r)
+
+newResolver :: (Token -> String -> IO a) -> IO Resolver
+newResolver tokenError = liftM4 (Resolver (fmap void . tokenError))
+                           (newIORef [])
+                           emptyStack (newIORef FT_None) (newIORef CT_None)
 
 resolveS :: Resolver -> Stmt -> IO ()
 resolveS r (Block statements) = do
@@ -157,7 +162,7 @@ define r name = unlessM (isEmpty (resolverScopes r)) $ do
 resolveLocal :: Resolver -> Expr -> Token -> IO ()
 resolveLocal r expr name = do
   f <- findIndex (tokenLexeme name `H.member`) <$> frames (resolverScopes r)
-  maybe (return ()) (resolveI (resolverInterpreter r) expr) f
+  sequence_ $ fmap (\f' -> modifyIORef (resolverLocals r) ((expr,f'):)) f
 
 newtype Stack a = Stack (IORef [a])
 

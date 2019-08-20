@@ -3,6 +3,8 @@ module Expr where
 
 import GHC.Generics (Generic)
 import Token (Token,Literal,Unique')
+import qualified TokenType as TT
+import Data.Hashable
 
 data Expr =
     Assign { assignName :: Token, assignId :: Unique', assignValue :: Expr }
@@ -18,3 +20,9 @@ data Expr =
   | Unary { unaryOperator :: Token, unaryRight :: Expr }
   | Variable { variableName :: Token, variableId :: Unique' }
   deriving (Show,Eq,Generic)
+
+instance Hashable TT.TokenType
+instance Hashable Literal
+instance Hashable Token
+instance Hashable Unique'
+instance Hashable Expr

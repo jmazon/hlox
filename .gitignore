@@ -1,6 +1,4 @@
 *~
-lox/Expr.hs
-lox/Stmt.hs
 *.o
 *.o-boot
 *.hi

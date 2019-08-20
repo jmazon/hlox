@@ -143,7 +143,7 @@ execute i (Class name superclass methods) = do
   klass <- newClass (tokenLexeme name) sc methods'
   assign (interpreterEnvironment i) name (toDyn klass)
 execute i (Expression expr) = void $ evaluate i expr
-execute i f@(Function name _ _) =
+execute i (Function f@(FunDecl name _ _)) =
   define (interpreterEnvironment i) (tokenLexeme name) .
     toDyn =<< newFunction f (interpreterEnvironment i) False
 execute i (If condition thenBranch elseBranch) = do

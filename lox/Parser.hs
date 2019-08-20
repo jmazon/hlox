@@ -37,7 +37,7 @@ declaration :: Parser -> IO (Maybe Stmt)
 declaration p =
   handle (\ParseError -> synchronize p >> return Nothing) $ Just <$> caseM
     [ (match p [TT.Class],classDeclaration p)
-    , (match p [TT.Fun],function p "function")
+    , (match p [TT.Fun],Function <$> function p "function")
     , (match p [TT.Var],varDeclaration p) ]
     (statement p)
 
@@ -132,7 +132,7 @@ expressionStatement p = do
   consume_ p TT.Semicolon "Expect ';' after expression."
   return (Expression expr)
 
-function :: Parser -> String -> IO Stmt
+function :: Parser -> String -> IO FunDecl
 function p kind = do
   name <- consume p TT.Identifier $ "Expect " ++ kind ++ " name."
   consume_ p TT.LeftParen $ "Expect '(' after " ++ kind ++ " name."
@@ -148,7 +148,7 @@ function p kind = do
 
   consume_ p TT.LeftBrace $ "Expect '{' before " ++ kind ++ " body."
   body <- block p
-  return (Function name parameters body)
+  return (FunDecl name parameters body)
 
 block :: Parser -> IO [Stmt]
 block p = do

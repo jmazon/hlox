@@ -57,10 +57,10 @@ resolveS r (Class name superclass methods) = do
   sequence_ $ endScope r <$ superclass
   writeIORef (resolverCurrentClass r) enclosingClass
 resolveS r (Expression expression) = resolveE r expression
-resolveS r stmt@(Function name _ _) = do
+resolveS r (Function f@(FunDecl name _ _)) = do
   declare r name
   define r name
-  resolveFunction r stmt FT_Function
+  resolveFunction r f FT_Function
 resolveS r (If condition thenBranch elseBranch) = do
   resolveE r condition
   resolveS r thenBranch
@@ -122,7 +122,7 @@ resolveE r expr@(Variable name _) = do
       resolverError r name "Cannot read local variable in its own initializer."
   resolveLocal r expr name
 
-resolveFunction :: Resolver -> Stmt -> FunctionType -> IO ()
+resolveFunction :: Resolver -> FunDecl -> FunctionType -> IO ()
 resolveFunction r function ftype = do
   enclosingFunction <- readIORef (resolverCurrentFunction r)
   writeIORef (resolverCurrentFunction r) ftype

@@ -1,10 +1,10 @@
 {-# LANGUAGE ExistentialQuantification #-}
-module LoxCallable where
+module LoxCallable (LoxCallable(..)) where
 
 import Data.Unique
 import Data.Dynamic
 
-import {-# SOURCE #-} Interpreter
+import {-# SOURCE #-} Interpreter (Interpreter)
 
 class LoxCallable c where
   arity :: c -> Int

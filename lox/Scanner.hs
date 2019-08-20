@@ -1,4 +1,4 @@
-module Scanner where
+module Scanner (newScanner,scanTokens) where
 
 import Data.Bool
 import Data.IORef
@@ -8,7 +8,7 @@ import qualified Data.HashMap.Strict as M
 import Data.HashMap.Strict (HashMap)
 import Data.Char (isAsciiLower,isAsciiUpper)
 
-import Token
+import Token (Token(Token),Literal(LNull,LNumber,LString))
 import qualified TokenType as TT
 import TokenType (TokenType)
 

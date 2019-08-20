@@ -1,8 +1,8 @@
-module Interpreter where
+module Interpreter (Interpreter,executeBlock,resolveI) where
 
 import Expr
 import Stmt
-import Environment
+import Environment (Environment)
 
 data Interpreter
 

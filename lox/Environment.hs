@@ -1,4 +1,4 @@
-module Environment where
+module Environment (Environment,newEnvironment,childEnvironment,define,getAt,assignAt,assign,get) where
 
 import Data.Maybe
 import Data.IORef
@@ -6,8 +6,8 @@ import qualified Data.HashMap.Strict as H
 import Control.Exception
 import Data.Dynamic
 
-import Token
-import RuntimeError
+import Token (Token,tokenLexeme)
+import RuntimeError (RuntimeError(RuntimeError))
 
 data Environment = Environment {
     environmentEnclosing :: Maybe Environment

@@ -1,4 +1,4 @@
-module Return where
+module Return (Return(Return)) where
 
 import Control.Exception
 import Data.Dynamic

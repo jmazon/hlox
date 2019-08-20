@@ -1,5 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
-module TokenType where
+module TokenType (TokenType(..)) where
 
 import GHC.Generics (Generic)
 

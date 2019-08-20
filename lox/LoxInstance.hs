@@ -1,4 +1,4 @@
-module LoxInstance where
+module LoxInstance (LoxInstance(LoxInstance),instanceClass,newInstance,getP,setP) where
 
 import Data.IORef
 import Data.HashMap.Strict (HashMap)
@@ -6,10 +6,10 @@ import qualified Data.HashMap.Strict as H
 import Control.Exception
 import Data.Dynamic
 
-import Token
-import LoxClass
-import RuntimeError
-import LoxFunction
+import Token (Token,tokenLexeme)
+import LoxClass (LoxClass,findMethod)
+import RuntimeError (RuntimeError(RuntimeError))
+import LoxFunction (bind)
 
 data LoxInstance = LoxInstance { instanceClass :: LoxClass
                                , instanceFields :: IORef (HashMap String Dynamic)}

@@ -4,13 +4,13 @@ import System.Exit
 import System.IO
 import Data.IORef
 
-import Scanner
-import Parser
-import Interpreter
-import Resolver
-import Token
-import qualified TokenType as TT
-import RuntimeError
+import Scanner (newScanner,scanTokens)
+import Parser (newParser,parse)
+import Interpreter (Interpreter,newInterpreter,interpret)
+import Resolver (newResolver,resolveS,unlessM)
+import Token (Token,tokenType,tokenLine,tokenLexeme)
+import qualified TokenType as TT (TokenType(Eof))
+import RuntimeError (RuntimeError(RuntimeError))
 
 data Lox = Lox { hadError :: IORef Bool
                , hadRuntimeError :: IORef Bool }

@@ -1,3 +1,3 @@
-module LoxClass where
+module LoxClass (LoxClass) where
 
 data LoxClass

@@ -1,4 +1,4 @@
-module LoxFunction where
+module LoxFunction (LoxFunction,newFunction,bind) where
 
 import Control.Exception
 import Control.Monad
@@ -6,12 +6,12 @@ import Data.Unique
 import Data.Dynamic
 
 import Stmt
-import Token
-import LoxCallable
-import Environment
-import Return
-import {-# SOURCE #-} Interpreter
-import {-# SOURCE #-} LoxInstance
+import Token (tokenLexeme)
+import LoxCallable (LoxCallable,arity,call,callableId,toString)
+import Environment (Environment,childEnvironment,define,getAt)
+import Return (Return(Return))
+import {-# SOURCE #-} Interpreter (executeBlock)
+import {-# SOURCE #-} LoxInstance (LoxInstance)
 
 data LoxFunction = LoxFunction { lfunDeclaration :: Stmt, lfunClosure :: Environment, lfunIsInitializer :: Bool, lfunId :: Unique }
 instance LoxCallable LoxFunction where

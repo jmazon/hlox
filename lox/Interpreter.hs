@@ -1,6 +1,6 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Interpreter where
+module Interpreter (Interpreter(Interpreter),newInterpreter,interpret,executeBlock,resolveI) where
 
 import Data.Char (toLower)
 import Data.List (isSuffixOf)
@@ -19,16 +19,16 @@ import Data.Dynamic
 import Control.Applicative
 
 import qualified TokenType as TT
-import Token
+import Token (Token,tokenType,tokenLexeme,Unique',Literal(LNull,LBool,LNumber,LString))
 import Expr
-import RuntimeError
+import RuntimeError (RuntimeError(RuntimeError))
 import Stmt
-import Environment
-import LoxClass
-import LoxInstance
-import LoxFunction
-import Return
-import LoxCallable
+import Environment (Environment,newEnvironment,define,getAt,assignAt,assign,childEnvironment,get)
+import LoxClass (LoxClass,newClass,className,findMethod)
+import LoxInstance (LoxInstance,getP,setP,instanceClass)
+import LoxFunction (LoxFunction,newFunction,bind)
+import Return (Return(Return))
+import LoxCallable (LoxCallable,arity,call,toString,callableId)
 
 data Interpreter = Interpreter { interpreterEnvironment :: Environment
                                , interpreterLocals :: IORef (HashMap Expr Int)}

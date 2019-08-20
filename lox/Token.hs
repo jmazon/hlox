@@ -1,9 +1,9 @@
 {-# LANGUAGE DeriveGeneric #-}
-module Token where
+module Token (Token(Token),tokenType,tokenLexeme,tokenLiteral,tokenLine,Literal(..),Unique'(Unique')) where
 
 import GHC.Generics (Generic)
 import Data.Unique
-import TokenType
+import TokenType (TokenType)
 
 data Token = Token {
     tokenType :: !TokenType

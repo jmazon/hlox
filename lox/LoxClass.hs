@@ -1,4 +1,4 @@
-module LoxClass where
+module LoxClass (LoxClass,className,newClass,findMethod) where
 
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
@@ -7,9 +7,9 @@ import Control.Applicative
 import Data.Unique
 import Data.Dynamic
 
-import LoxCallable
-import LoxFunction
-import {-# SOURCE #-} LoxInstance
+import LoxCallable (LoxCallable,arity,call,toString,callableId)
+import LoxFunction (LoxFunction,bind)
+import {-# SOURCE #-} LoxInstance (newInstance)
 
 data LoxClass = LoxClass { className :: String
                          , classSuperclass :: Maybe LoxClass

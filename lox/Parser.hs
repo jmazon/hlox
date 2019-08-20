@@ -1,5 +1,5 @@
 {-# LANGUAGE TupleSections,ScopedTypeVariables #-}
-module Parser where
+module Parser (newParser,parse) where
 
 import Prelude hiding (or,and)
 import Data.Maybe
@@ -11,7 +11,7 @@ import Control.Exception
 
 import qualified TokenType as TT
 import TokenType (TokenType)
-import Token
+import Token (Token,tokenLiteral,tokenType,Unique'(Unique'),Literal(LNull,LBool))
 import Expr
 import Stmt
 

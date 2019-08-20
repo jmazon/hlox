@@ -1,4 +1,4 @@
-module Resolver where
+module Resolver (newResolver,resolveS,unlessM) where
 
 import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
@@ -8,10 +8,10 @@ import Data.Maybe
 import Data.Functor
 import Control.Monad
 
-import Token
+import Token (Token,tokenLexeme)
 import Expr
 import Stmt
-import Interpreter
+import Interpreter (Interpreter,resolveI)
 
 data FunctionType = FT_None | FT_Function | FT_Method | FT_Initializer
 data ClassType = CT_None | CT_Class | CT_Subclass

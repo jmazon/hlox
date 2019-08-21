@@ -61,6 +61,7 @@ run lox interpreter source = do
 
 scanError :: Lox -> Int -> String -> IO ()
 scanError lox line message = report lox line "" message
+{-# ANN scanError "HLint: ignore Eta reduce" #-}
 
 report :: Lox -> Int -> String -> String -> IO ()
 report lox line location message = do

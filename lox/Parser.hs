@@ -251,6 +251,7 @@ caseM cs0 def = go cs0 where
   
 binary :: Parser -> [TokenType] -> (Parser -> IO Expr) -> IO Expr
 binary p tokens next = leftAssoc p tokens Binary next
+{-# ANN binary "HLint: ignore Eta reduce" #-}
 
 leftAssoc :: Parser -> [TokenType] -> (Expr -> Token -> Expr -> Expr) -> (Parser -> IO Expr) -> IO Expr
 leftAssoc p tokens node next = do

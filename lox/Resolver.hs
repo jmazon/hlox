@@ -15,6 +15,8 @@ import Stmt
 
 data FunctionType = FT_None | FT_Function | FT_Method | FT_Initializer
 data ClassType = CT_None | CT_Class | CT_Subclass
+{-# ANN FunctionType "HLint: ignore Use camelCase" #-}
+{-# ANN ClassType "HLint: ignore Use camelCase" #-}
 
 data Resolver = Resolver
                 { resolverError :: Token -> String -> IO ()

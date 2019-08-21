@@ -30,7 +30,7 @@ import Return (Return(Return))
 import LoxCallable (LoxCallable,arity,call,toString,callableId)
 
 data Interpreter = Interpreter { interpreterEnvironment :: Environment
-                               , interpreterLocals :: IORef (HashMap Expr Int)}
+                               , interpreterLocals :: IORef (HashMap Unique Int)}
 
 globals :: Environment
 {-# NOINLINE globals #-}
@@ -68,15 +68,15 @@ evaluate i (Set object name value) = do
                           setP inst name v
                           return v
                         Nothing -> throwIO (RuntimeError name "Only instances have fields.")
-evaluate i expr@(Super _ _ method) = do
-  Just distance <- H.lookup expr <$> readIORef (interpreterLocals i)
+evaluate i (Super _ key method) = do
+  Just distance <- H.lookup key <$> readIORef (interpreterLocals i)
   Just superclass <- fromDynamic <$> getAt (interpreterEnvironment i) distance "super"
   -- "this" is always one level nearer than "super"'s environment
   Just object <- fromDynamic <$> getAt (interpreterEnvironment i) (distance - 1) "this"
   case findMethod superclass (tokenLexeme method) of
     Just m -> toDyn <$> bind m object
     Nothing -> throwIO (RuntimeError method ("Undefined property '" ++ tokenLexeme method ++ "'."))
-evaluate i expr@(This keyword _) = lookupVariable i keyword expr
+evaluate i (This keyword key) = lookupVariable i keyword key
 evaluate i (Grouping expr) = evaluate i expr
 evaluate i (Unary operator right) = do
   r <- evaluate i right
@@ -84,10 +84,10 @@ evaluate i (Unary operator right) = do
     TT.Bang -> return (toDyn (not (isTruthy r)))
     TT.Minus -> toDyn . negate <$> getNumberOperand operator r
     _ -> return (toDyn ()) -- XXX why?
-evaluate i expr@(Variable name _) = lookupVariable i name expr
-evaluate i expr@(Assign name _ value) = do
+evaluate i (Variable name key) = lookupVariable i name key
+evaluate i (Assign name key value) = do
   v <- evaluate i value
-  distance <- H.lookup expr <$> readIORef (interpreterLocals i)
+  distance <- H.lookup key <$> readIORef (interpreterLocals i)
   case distance of Just d -> assignAt (interpreterEnvironment i) d name v
                    Nothing -> assign globals name v
   return v
@@ -167,13 +167,13 @@ executeBlock :: Interpreter -> [Stmt] -> Environment -> IO ()
 executeBlock i statements environment =
   forM_ statements $ execute i { interpreterEnvironment = environment }
 
-resolveLocals :: Interpreter -> [(Expr,Int)] -> IO ()
+resolveLocals :: Interpreter -> [(Unique,Int)] -> IO ()
 resolveLocals i kvs = modifyIORef (interpreterLocals i) $
                       \h0 -> foldl' (\h (k,v) -> H.insert k v h) h0 kvs
 
-lookupVariable :: Interpreter -> Token -> Expr -> IO Dynamic
-lookupVariable i name expr = do
-  distance <- H.lookup expr <$> readIORef (interpreterLocals i)
+lookupVariable :: Interpreter -> Token -> Unique -> IO Dynamic
+lookupVariable i name key = do
+  distance <- H.lookup key <$> readIORef (interpreterLocals i)
   case distance of
     Just d -> getAt (interpreterEnvironment i) d (tokenLexeme name)
     Nothing -> get globals name

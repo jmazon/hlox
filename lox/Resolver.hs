@@ -7,6 +7,7 @@ import Data.List
 import Data.Maybe
 import Data.Functor
 import Control.Monad
+import Data.Unique
 
 import Token (Token,tokenLexeme)
 import Expr
@@ -17,12 +18,12 @@ data ClassType = CT_None | CT_Class | CT_Subclass
 
 data Resolver = Resolver
                 { resolverError :: Token -> String -> IO ()
-                , resolverLocals :: IORef [(Expr,Int)]
+                , resolverLocals :: IORef [(Unique,Int)]
                 , resolverScopes :: Stack (HashMap String Bool)
                 , resolverCurrentFunction :: IORef FunctionType
                 , resolverCurrentClass :: IORef ClassType }
 
-resolve :: Resolver -> [Stmt] -> IO [(Expr,Int)]
+resolve :: Resolver -> [Stmt] -> IO [(Unique,Int)]
 resolve r statements = do
   mapM_ (resolveS r) statements
   readIORef (resolverLocals r)
@@ -89,9 +90,9 @@ resolveS r (While condition body) = do
   resolveS r body
 
 resolveE :: Resolver -> Expr -> IO ()
-resolveE r expr@(Assign name _ value) = do
+resolveE r (Assign name key value) = do
   resolveE r value
-  resolveLocal r expr name
+  resolveLocal r key name
 resolveE r (Binary left _ right) = do
   resolveE r left
   resolveE r right
@@ -107,25 +108,25 @@ resolveE r (Logical left _ right) = do
 resolveE r (Set object _ value) = do
   resolveE r value
   resolveE r object
-resolveE r expr@(Super keyword _ _) = do
+resolveE r (Super keyword key _) = do
   cc <- readIORef (resolverCurrentClass r)
   case cc of
     CT_None -> resolverError r keyword "Cannot use 'super' outside of a class."
     _ -> case cc of
       CT_Subclass -> return ()
       _ -> resolverError r keyword "Cannot use 'super' in a class with no superclass."
-  resolveLocal r expr keyword
-resolveE r expr@(This keyword _) = do
+  resolveLocal r key keyword
+resolveE r (This keyword key) = do
   cc <- readIORef (resolverCurrentClass r)
   case cc of CT_None -> resolverError r keyword "Cannot use 'this' outside of a class."
-             _ -> resolveLocal r expr keyword
+             _ -> resolveLocal r key keyword
 resolveE r (Unary _ right) = resolveE r right
-resolveE r expr@(Variable name _) = do
+resolveE r (Variable name key) = do
   whenM (not <$> isEmpty (resolverScopes r)) $
     whenM ((== Just False) . H.lookup (tokenLexeme name) <$>
            peek (resolverScopes r)) $
       resolverError r name "Cannot read local variable in its own initializer."
-  resolveLocal r expr name
+  resolveLocal r key name
 
 resolveFunction :: Resolver -> FunDecl -> FunctionType -> IO ()
 resolveFunction r function ftype = do
@@ -159,10 +160,10 @@ define r name = unlessM (isEmpty (resolverScopes r)) $ do
   scope <- pop (resolverScopes r)
   push (resolverScopes r) (H.insert (tokenLexeme name) True scope)
 
-resolveLocal :: Resolver -> Expr -> Token -> IO ()
-resolveLocal r expr name = do
+resolveLocal :: Resolver -> Unique -> Token -> IO ()
+resolveLocal r key name = do
   f <- findIndex (tokenLexeme name `H.member`) <$> frames (resolverScopes r)
-  sequence_ $ fmap (\f' -> modifyIORef (resolverLocals r) ((expr,f'):)) f
+  mapM_ (\f' -> modifyIORef (resolverLocals r) ((key,f'):)) f
 
 newtype Stack a = Stack (IORef [a])
 

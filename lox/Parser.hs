@@ -11,7 +11,7 @@ import Control.Exception
 
 import qualified TokenType as TT
 import TokenType (TokenType)
-import Token (Token,tokenLiteral,tokenType,Unique'(Unique'),Literal(LNull,LBool))
+import Token (Token,tokenLiteral,tokenType,Literal(LNull,LBool))
 import Expr
 import Stmt
 
@@ -45,7 +45,7 @@ classDeclaration :: Parser -> IO Stmt
 classDeclaration p = do
   name <- consume p TT.Identifier "Expect class name."
   superclass <- ifM (match p [TT.Less]) (consume_ p TT.Identifier "Expect superclass name." >>
-                                         Just <$> liftM2 Variable (previous p) (Unique' <$> newUnique))
+                                         Just <$> liftM2 Variable (previous p) newUnique)
                       (return Nothing)
   consume_ p TT.LeftBrace "Expect '{' before class body."
   methods <- whileM (andM [not <$> check p TT.RightBrace,not <$> isAtEnd p]) $
@@ -167,7 +167,7 @@ assignment p = do
       value <- assignment p
       case expr of Variable name _ -> do
                      u <- newUnique
-                     return (Assign name (Unique' u) value)
+                     return (Assign name u value)
                    Get object name -> return (Set object name value)
                    _ -> parseError p "Invalid assignment target." equals
                         >> return (Literal LNull)
@@ -233,10 +233,10 @@ primary p = caseM
         keyword <- previous p
         consume_ p TT.Dot "Expect '.' after 'super'."
         method <- consume p TT.Identifier "Expect superclass method name."
-        id <- Unique' <$> newUnique
-        return (Super keyword id method))
-  , (match p [TT.This],liftM2 This (previous p) (Unique' <$> newUnique))
-  , (match p [TT.Identifier],liftM2 Variable (previous p) (Unique' <$> newUnique))
+        key <- newUnique
+        return (Super keyword key method))
+  , (match p [TT.This],liftM2 This (previous p) newUnique)
+  , (match p [TT.Identifier],liftM2 Variable (previous p) newUnique)
   , (match p [TT.LeftParen],do
         expr <- expression p
         consume_ p TT.RightParen "Expect ')' after expression."

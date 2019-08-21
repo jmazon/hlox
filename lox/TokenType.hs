@@ -1,7 +1,4 @@
-{-# LANGUAGE DeriveGeneric #-}
 module TokenType (TokenType(..)) where
-
-import GHC.Generics (Generic)
 
 data TokenType =
   -- Single-character tokens
@@ -23,4 +20,4 @@ data TokenType =
 
   | Eof
 
-  deriving (Show,Eq,Generic)
+  deriving (Show,Eq)

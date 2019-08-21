@@ -6,6 +6,9 @@ import Control.Monad
 import qualified Data.HashMap.Strict as M
 import Data.HashMap.Strict (HashMap)
 import Data.Char (isAsciiLower,isAsciiUpper)
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Read as T
 
 import Util
 import Token (Token(Token),Literal(LNull,LNumber,LString))
@@ -14,14 +17,14 @@ import TokenType (TokenType)
 
 data Scanner = Scanner {
     scannerError :: Int -> String -> IO ()
-  , scannerSource :: String
+  , scannerSource :: Text
   , scannerTokens :: IORef [Token]
   , scannerStart :: IORef Int
   , scannerCurrent :: IORef Int
   , scannerLine :: IORef Int
   }
 
-newScanner :: (Int -> String -> IO ()) -> String -> IO Scanner
+newScanner :: (Int -> String -> IO ()) -> Text -> IO Scanner
 newScanner err source = liftM4 (Scanner err source)
                           (newIORef [])
                           (newIORef 0)
@@ -38,14 +41,14 @@ scanTokens s = do
   readIORef (scannerTokens s)
   
 isAtEnd :: Scanner -> IO Bool
-isAtEnd s = (>= length (scannerSource s)) <$>readIORef (scannerCurrent s)
+isAtEnd s = (>= T.length (scannerSource s)) <$> readIORef (scannerCurrent s)
 
 advance_ :: Scanner -> IO ()
 advance_ s = modifyIORef (scannerCurrent s) succ
 advance :: Scanner -> IO Char
 advance s = do
   advance_ s
-  (scannerSource s !!) . pred <$> readIORef (scannerCurrent s)
+  T.index (scannerSource s) . pred <$> readIORef (scannerCurrent s)
 
 addToken :: Scanner -> TT.TokenType -> IO ()
 addToken s tokType = addTokenLit s tokType LNull
@@ -56,7 +59,7 @@ addTokenLit s tokType literal = do
             (readIORef (scannerStart s))
             (readIORef (scannerCurrent s))
   l <- readIORef (scannerLine s)
-  modifyIORef (scannerTokens s) (++ [Token tokType text literal l])
+  modifyIORef (scannerTokens s) (++ [Token tokType (T.unpack text) literal l])
   
 scanToken :: Scanner -> IO ()
 scanToken s = do
@@ -116,10 +119,11 @@ number s = do
     advance_ s
     whileM_ (isDigit <$> peek s) (advance_ s)
 
-  addTokenLit s TT.Number . LNumber . read =<<
+  addTokenLit s TT.Number . LNumber . readRat =<<
     liftM2 (substr (scannerSource s))
       (readIORef (scannerStart s))
       (readIORef (scannerCurrent s))
+    where readRat t = n where Right (n,_) = T.rational t
 
 string :: Scanner ->  IO ()
 string s = do
@@ -150,7 +154,7 @@ match s c = do
   ae <- isAtEnd s
   if ae then return False else do
     cur <- readIORef (scannerCurrent s)
-    let c' = scannerSource s !! cur
+    let c' = scannerSource s `T.index` cur
     if c' /= c then return False else do
       modifyIORef (scannerCurrent s) succ
       return True
@@ -160,14 +164,14 @@ peek s = do
   ae <- isAtEnd s
   if ae
     then return '\0'
-    else (scannerSource s !!) <$> readIORef (scannerCurrent s)
+    else T.index (scannerSource s) <$> readIORef (scannerCurrent s)
 
 peekNext :: Scanner -> IO Char
 peekNext s = do
   c <- readIORef (scannerCurrent s)
-  if c + 1 >= length (scannerSource s)
+  if c + 1 >= T.length (scannerSource s)
     then return '\0'
-    else return (scannerSource s !! (c + 1))
+    else return (scannerSource s `T.index` (c + 1))
 
 isAlpha :: Char -> Bool
 isAlpha c = isAsciiLower c || isAsciiUpper c || c == '_'
@@ -178,23 +182,23 @@ isAlphaNumeric c = isAlpha c || isDigit c
 isDigit :: Char -> Bool
 isDigit c = c >= '0' && c <= '9'
 
-substr :: String -> Int -> Int -> String
-substr str start end = take (end-start) (drop start str)
+substr :: Text -> Int -> Int -> Text
+substr str start end = T.take (end-start) (T.drop start str)
 
-keywords :: HashMap String TokenType
-keywords = M.fromList [ ("and", TT.And)
-                      , ("class", TT.Class)
-                      , ("else", TT.Else)
-                      , ("false", TT.False)
-                      , ("for", TT.For)
-                      , ("fun", TT.Fun)
-                      , ("if", TT.If)
-                      , ("nil", TT.Nil)
-                      , ("or", TT.Or)
-                      , ("print", TT.Print)
-                      , ("return", TT.Return)
-                      , ("super", TT.Super)
-                      , ("this", TT.This)
-                      , ("true", TT.True)
-                      , ("var", TT.Var)
-                      , ("while", TT.While) ]
+keywords :: HashMap Text TokenType
+keywords = M.fromList [ (T.pack "and", TT.And)
+                      , (T.pack "class", TT.Class)
+                      , (T.pack "else", TT.Else)
+                      , (T.pack "false", TT.False)
+                      , (T.pack "for", TT.For)
+                      , (T.pack "fun", TT.Fun)
+                      , (T.pack "if", TT.If)
+                      , (T.pack "nil", TT.Nil)
+                      , (T.pack "or", TT.Or)
+                      , (T.pack "print", TT.Print)
+                      , (T.pack "return", TT.Return)
+                      , (T.pack "super", TT.Super)
+                      , (T.pack "this", TT.This)
+                      , (T.pack "true", TT.True)
+                      , (T.pack "var", TT.Var)
+                      , (T.pack "while", TT.While) ]

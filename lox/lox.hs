@@ -3,6 +3,8 @@ import System.Environment
 import System.Exit
 import System.IO
 import Data.IORef
+import Data.Text (Text)
+import qualified Data.Text.IO as T
 
 import Util
 import Scanner (newScanner,scanTokens)
@@ -33,7 +35,7 @@ main = do
 
 runFile :: Lox -> Interpreter -> FilePath -> IO ()
 runFile lox interpreter path = do
-  bytes <- readFile path
+  bytes <- T.readFile path
   run lox interpreter bytes
 
   he <- readIORef (hadError lox)
@@ -45,10 +47,10 @@ runPrompt :: Lox -> Interpreter -> IO ()
 runPrompt lox interpreter = forever $ do
   putStr "> "
   hFlush stdout
-  run lox interpreter =<< getLine
+  run lox interpreter =<< T.getLine
   writeIORef (hadError lox) False
 
-run :: Lox -> Interpreter -> String -> IO ()
+run :: Lox -> Interpreter -> Text -> IO ()
 run lox interpreter source = do
   scanner <- newScanner (scanError lox) source
   tokens <- scanTokens scanner

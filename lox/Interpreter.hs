@@ -15,6 +15,8 @@ import Numeric
 import Data.Unique
 import Data.Dynamic
 import Control.Applicative
+import Data.Text (Text)
+import qualified Data.Text as T
 
 import Util
 import qualified TokenType as TT
@@ -104,7 +106,7 @@ evaluate i (Binary left operator right) = do
     TT.EqualEqual -> return (toDyn (isEqual l r))
 
     TT.Plus | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl + vr :: Double))
-            | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl ++ vr :: String))
+            | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl `T.append` vr))
             | otherwise -> throwIO (RuntimeError operator "Operands must be two numbers or two strings.")
     TT.Minus -> toDyn . uncurry (-) <$> getNumberOperands operator l r
     TT.Slash -> toDyn . uncurry (/) <$> getNumberOperands operator l r
@@ -198,7 +200,7 @@ isEqual a b
   | Just () <- fromDynamic a, Just () <- fromDynamic b = True
   | Just (da :: Double) <- fromDynamic a, Just db <- fromDynamic b = da == db
   | Just (ba :: Bool) <- fromDynamic a, Just bb <- fromDynamic b = ba == bb
-  | Just (sa :: String) <- fromDynamic a, Just sb <- fromDynamic b = sa == sb
+  | Just (ta :: Text) <- fromDynamic a, Just tb <- fromDynamic b = ta == tb
   | Just (IsCallable ca) <- dynToCallable a, Just (IsCallable cb) <- dynToCallable b = callableId ca == callableId cb
   | otherwise = False
 
@@ -209,7 +211,7 @@ stringify v
   | Just (d :: Double) <- fromDynamic v = case showFFloat Nothing d "" of
       s | ".0" `isSuffixOf` s -> init (init s)
         | otherwise -> s
-  | Just (s :: String) <- fromDynamic v = s
+  | Just (t :: Text) <- fromDynamic v = T.unpack t
   | Just (IsCallable c) <- dynToCallable v = toString c
   | Just (i :: LoxInstance) <- fromDynamic v = LoxClass.className (instanceClass i) ++ " instance"
   | otherwise = error "Internal error: unknown type to stringify" -- XXX

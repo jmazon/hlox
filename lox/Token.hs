@@ -1,5 +1,8 @@
 module Token (Token(Token),tokenType,tokenLexeme,tokenLiteral,tokenLine,Literal(..)) where
 
+import Data.Text (Text)
+import qualified Data.Text as T
+
 import TokenType (TokenType)
 
 data Token = Token {
@@ -12,9 +15,9 @@ data Token = Token {
 instance Show Token where
   show (Token t lx lit _) = show t ++ " " ++ lx ++ " " ++ show lit
 
-data Literal = LNull | LString String | LNumber Double | LBool Bool
+data Literal = LNull | LString Text | LNumber Double | LBool Bool
 instance Show Literal where
   show LNull = "(null)"
-  show (LString s) = s
+  show (LString s) = T.unpack s
   show (LNumber n) = show n
   show (LBool tf) = show tf

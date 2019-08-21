@@ -4,10 +4,11 @@ import System.Exit
 import System.IO
 import Data.IORef
 
+import Util
 import Scanner (newScanner,scanTokens)
 import Parser (newParser,parse)
 import Interpreter (Interpreter,newInterpreter,interpret,resolveLocals)
-import Resolver (newResolver,resolve,unlessM)
+import Resolver (newResolver,resolve)
 import Token (Token,tokenType,tokenLine,tokenLexeme)
 import qualified TokenType as TT (TokenType(Eof))
 import RuntimeError (RuntimeError(RuntimeError))

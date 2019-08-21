@@ -3,11 +3,11 @@ module Scanner (newScanner,scanTokens) where
 import Data.Bool
 import Data.IORef
 import Control.Monad
-import Control.Monad.Loops
 import qualified Data.HashMap.Strict as M
 import Data.HashMap.Strict (HashMap)
 import Data.Char (isAsciiLower,isAsciiUpper)
 
+import Util
 import Token (Token(Token),Literal(LNull,LNumber,LString))
 import qualified TokenType as TT
 import TokenType (TokenType)

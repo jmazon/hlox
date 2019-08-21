@@ -6,9 +6,9 @@ import Data.Maybe
 import Data.IORef
 import Data.Unique
 import Control.Monad.Cont
-import Control.Monad.Loops
 import Control.Exception
 
+import Util
 import qualified TokenType as TT
 import TokenType (TokenType)
 import Token (Token,tokenLiteral,tokenType,Literal(LNull,LBool))
@@ -242,12 +242,6 @@ primary p = caseM
         consume_ p TT.RightParen "Expect ')' after expression."
         return (Grouping expr)) ]
   (throwIO =<< parseError p "Expect expression." =<< peek p)
-
-caseM :: Monad m => [(m Bool,m a)] -> m a -> m a
-caseM cs0 def = go cs0 where
-  go ((c,b):cs) = do p <- c
-                     if p then b else go cs
-  go [] = def
   
 binary :: Parser -> [TokenType] -> (Parser -> IO Expr) -> IO Expr
 binary p tokens next = leftAssoc p tokens Binary next
@@ -316,6 +310,3 @@ synchronize p = do
                              ,TT.If,TT.While,TT.Print,TT.Return]) . tokenType
                   <$> peek p ] ) $
     advance_ p
-
-ifM :: Monad m => m Bool -> m a -> m a -> m a
-ifM c t e = c >>= \p -> if p then t else e

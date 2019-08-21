@@ -8,7 +8,6 @@ import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
 import Data.IORef
 import Control.Monad
-import Control.Monad.Loops
 import Control.Exception hiding (evaluate)
 import System.IO.Unsafe
 import System.Clock (TimeSpec(TimeSpec),getTime,Clock(Monotonic))
@@ -17,6 +16,7 @@ import Data.Unique
 import Data.Dynamic
 import Control.Applicative
 
+import Util
 import qualified TokenType as TT
 import Token (Token,tokenType,tokenLexeme,Literal(LNull,LBool,LNumber,LString))
 import Expr

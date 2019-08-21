@@ -1,4 +1,4 @@
-module Resolver (newResolver,resolve,unlessM) where
+module Resolver (newResolver,resolve) where
 
 import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
@@ -9,14 +9,15 @@ import Data.Functor
 import Control.Monad
 import Data.Unique
 
+import Util
 import Token (Token,tokenLexeme)
 import Expr
 import Stmt
 
 data FunctionType = FT_None | FT_Function | FT_Method | FT_Initializer
 data ClassType = CT_None | CT_Class | CT_Subclass
-{-# ANN FunctionType "HLint: ignore Use camelCase" #-}
-{-# ANN ClassType "HLint: ignore Use camelCase" #-}
+{-# ANN type FunctionType "HLint: ignore Use camelCase" #-}
+{-# ANN type ClassType "HLint: ignore Use camelCase" #-}
 
 data Resolver = Resolver
                 { resolverError :: Token -> String -> IO ()
@@ -189,11 +190,3 @@ isEmpty (Stack r) = null <$> readIORef r
 
 frames :: Stack a -> IO [a]
 frames (Stack r) = readIORef r
-
-whenM :: Monad m => m Bool -> m () -> m ()
-whenM c b = do p <- c
-               when p b
-
-unlessM :: Monad m => m Bool -> m () -> m ()
-unlessM c b = do p <- c
-                 unless p b

@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Scanner (newScanner,scanTokens) where
+module Scanner (scanTokens) where
 
 import Data.Bool
 import Data.IORef
@@ -32,8 +32,9 @@ newScanner err source = liftM4 (Scanner err source)
                           (newIORef 0)
                           (newIORef 1)
 
-scanTokens :: Scanner -> IO [Token]
-scanTokens s = do
+scanTokens :: (Int -> Text -> IO ()) -> Text -> IO [Token]
+scanTokens err source = do
+  s <- newScanner err source
   whileM_ (not <$> isAtEnd s) $ do
     writeIORef (scannerStart s) =<< readIORef (scannerCurrent s)
     scanToken s

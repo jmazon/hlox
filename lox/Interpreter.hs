@@ -45,9 +45,9 @@ globals = unsafePerformIO $ do
 newInterpreter :: IO Interpreter
 newInterpreter = Interpreter globals <$> newIORef H.empty
 
-interpret :: (RuntimeError -> IO ()) -> Interpreter -> [Stmt] -> IO ()
-interpret runtimeError i statements =
-  mapM_ (execute i) statements `catch` runtimeError
+interpret :: Interpreter -> [Stmt] -> IO (Either RuntimeError ())
+interpret i statements =
+  try (mapM_ (execute i) statements)
 
 evaluate :: Interpreter -> Expr -> IO Dynamic
 evaluate _ (Literal LNull) = return (toDyn ())

@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Resolver (newResolver,resolve) where
+module Resolver (resolve) where
 
 import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
@@ -28,8 +28,9 @@ data Resolver = Resolver
                 , resolverCurrentFunction :: IORef FunctionType
                 , resolverCurrentClass :: IORef ClassType }
 
-resolve :: Resolver -> [Stmt] -> IO [(Unique,Int)]
-resolve r statements = do
+resolve :: (Token -> Text -> IO a) -> [Stmt] -> IO [(Unique,Int)]
+resolve tokenError statements = do
+  r <- newResolver tokenError
   mapM_ (resolveS r) statements
   readIORef (resolverLocals r)
 

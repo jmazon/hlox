@@ -8,59 +8,63 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
-import Util
 import Scanner (scanTokens)
 import Parser (parse)
 import Interpreter (Interpreter,newInterpreter,interpret,resolveLocals)
-import Resolver (newResolver,resolve)
+import Resolver (resolve)
 import Token (Token,tokenType,tokenLine,tokenLexeme)
 import qualified TokenType as TT (TokenType(Eof))
 import RuntimeError (RuntimeError(RuntimeError))
 
-data Lox = Lox { hadError :: IORef Bool
-               , hadRuntimeError :: IORef Bool }
+data Lox = Lox { interpreter :: Interpreter
+               , hadError :: IORef Bool }
 
-newLox :: IO Lox
-newLox = liftM2 Lox (newIORef False) (newIORef False)
+newLox :: Interpreter -> IO Lox
+newLox i = fmap (Lox i) (newIORef False)
 
 main :: IO ()
 main = do
-  lox <- newLox
-  interpreter <- newInterpreter
+  lox <- newLox =<< newInterpreter
   args <- getArgs
   if length args > 1
     then do putStrLn "Usage: hlox [script]"
             exitWith $ ExitFailure 64
     else if length args == 1
-         then runFile lox interpreter (head args)
-         else runPrompt lox interpreter
+         then runFile lox (head args)
+         else runPrompt lox
 
-runFile :: Lox -> Interpreter -> FilePath -> IO ()
-runFile lox interpreter path = do
+runFile :: Lox -> FilePath -> IO ()
+runFile lox path = do
   bytes <- T.readFile path
-  run lox interpreter bytes
+  result <- run lox bytes
 
-  he <- readIORef (hadError lox)
-  when he $ exitWith (ExitFailure 65)
-  hre <- readIORef (hadRuntimeError lox)
-  when hre $ exitWith (ExitFailure 70)
+  case result of
+    NoError -> return ()
+    HadError -> exitWith (ExitFailure 65)
+    HadRuntimeError -> exitWith (ExitFailure 70)
 
-runPrompt :: Lox -> Interpreter -> IO ()
-runPrompt lox interpreter = forever $ do
+runPrompt :: Lox -> IO ()
+runPrompt lox = forever $ do
   putStr "> "
   hFlush stdout
-  run lox interpreter =<< T.getLine
+  run lox =<< T.getLine
   writeIORef (hadError lox) False
 
-run :: Lox -> Interpreter -> Text -> IO ()
-run lox interpreter source = do
+data RunResult = NoError | HadError | HadRuntimeError
+
+run :: Lox -> Text -> IO RunResult
+run lox source = do
   tokens <- scanTokens (scanError lox) source
   statements <- parse (tokenError lox) tokens
-  unlessM (readIORef (hadError lox)) $ do
-    resolver <- newResolver (tokenError lox)
-    resolveLocals interpreter =<< resolve resolver statements
-    unlessM (readIORef (hadError lox)) $
-      interpret (runtimeError lox) interpreter statements
+  he1 <- readIORef (hadError lox)
+  if he1 then return HadError else do
+    resolveLocals (interpreter lox) =<< resolve (tokenError lox) statements
+    he2 <- readIORef (hadError lox)
+    if he2 then return HadError else do
+      result <- interpret (interpreter lox) statements
+      case result of
+        Left rte -> runtimeError rte
+        _ -> return NoError
 
 scanError :: Lox -> Int -> Text -> IO ()
 scanError lox line message = report lox line "" message
@@ -79,10 +83,10 @@ tokenError lox t m =
     then report lox (tokenLine t) " at end" m
     else report lox (tokenLine t) (T.concat [" at '",tokenLexeme t,"'"]) m
 
-runtimeError :: Lox -> RuntimeError -> IO ()
-runtimeError lox (RuntimeError token message) = do
+runtimeError :: RuntimeError -> IO RunResult
+runtimeError (RuntimeError token message) = do
   T.hPutStrLn stderr $ T.concat [ message
                                 , "\n[line "
                                 , T.pack (show (tokenLine token))
                                 , "]" ]
-  writeIORef (hadRuntimeError lox) True
+  return HadRuntimeError

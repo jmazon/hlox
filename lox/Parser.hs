@@ -1,5 +1,5 @@
 {-# LANGUAGE TupleSections,ScopedTypeVariables,OverloadedStrings #-}
-module Parser (newParser,parse) where
+module Parser (parse) where
 
 import Prelude hiding (or,and)
 import Data.Maybe
@@ -29,8 +29,10 @@ data Parser = Parser {
 newParser :: (Token -> Text -> IO ()) -> [Token] -> IO Parser
 newParser tokenError tokens = Parser tokenError tokens <$> newIORef 0
 
-parse :: Parser -> IO [Stmt]
-parse p = fmap catMaybes $ whileM (not <$> isAtEnd p) $ declaration p
+parse :: (Token -> Text -> IO ()) -> [Token] -> IO [Stmt]
+parse tokenError tokens = do
+  p <- newParser tokenError tokens
+  fmap catMaybes $ whileM (not <$> isAtEnd p) $ declaration p
 
 expression :: Parser -> IO Expr
 expression = assignment

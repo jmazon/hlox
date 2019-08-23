@@ -10,7 +10,7 @@ import qualified Data.Text.IO as T
 
 import Util
 import Scanner (scanTokens)
-import Parser (newParser,parse)
+import Parser (parse)
 import Interpreter (Interpreter,newInterpreter,interpret,resolveLocals)
 import Resolver (newResolver,resolve)
 import Token (Token,tokenType,tokenLine,tokenLexeme)
@@ -55,8 +55,7 @@ runPrompt lox interpreter = forever $ do
 run :: Lox -> Interpreter -> Text -> IO ()
 run lox interpreter source = do
   tokens <- scanTokens (scanError lox) source
-  parser <- newParser (tokenError lox) tokens
-  statements <- parse parser
+  statements <- parse (tokenError lox) tokens
   unlessM (readIORef (hadError lox)) $ do
     resolver <- newResolver (tokenError lox)
     resolveLocals interpreter =<< resolve resolver statements

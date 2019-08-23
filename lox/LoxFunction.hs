@@ -1,9 +1,11 @@
+{-# LANGUAGE OverloadedStrings #-}
 module LoxFunction (LoxFunction,newFunction,bind) where
 
 import Control.Exception
 import Control.Monad
 import Data.Unique
 import Data.Dynamic
+import qualified Data.Text as T
 
 import Stmt
 import Token (tokenLexeme)
@@ -26,7 +28,7 @@ instance LoxCallable LoxFunction where
       executeBlock i body environment
       if isInitializer then getAt closure 0 "this" else return (toDyn ())
   callableId = lfunId
-  toString (LoxFunction (FunDecl name _ _) _ _ _) = "<fn " ++ tokenLexeme name ++ ">"
+  toString (LoxFunction (FunDecl name _ _) _ _ _) = T.concat ["<fn ",tokenLexeme name,">"]
 
 newFunction :: FunDecl -> Environment -> Bool -> IO LoxFunction
 newFunction decl closure isInit = LoxFunction decl closure isInit <$> newUnique

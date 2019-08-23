@@ -7,13 +7,13 @@ import TokenType (TokenType)
 
 data Token = Token {
     tokenType :: !TokenType
-  , tokenLexeme :: String
+  , tokenLexeme :: Text
   , tokenLiteral :: Literal
   , tokenLine :: !Int
   }
 
 instance Show Token where
-  show (Token t lx lit _) = show t ++ " " ++ lx ++ " " ++ show lit
+  show (Token t lx lit _) = show t ++ " " ++ T.unpack lx ++ " " ++ show lit
 
 data Literal = LNull | LString Text | LNumber Double | LBool Bool
 instance Show Literal where

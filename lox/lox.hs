@@ -1,9 +1,11 @@
+{-# LANGUAGE OverloadedStrings #-}
 import Control.Monad
 import System.Environment
 import System.Exit
 import System.IO
 import Data.IORef
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
 import Util
@@ -62,23 +64,27 @@ run lox interpreter source = do
     unlessM (readIORef (hadError lox)) $
       interpret (runtimeError lox) interpreter statements
 
-scanError :: Lox -> Int -> String -> IO ()
+scanError :: Lox -> Int -> Text -> IO ()
 scanError lox line message = report lox line "" message
-{-# ANN scanError "HLint: ignore Eta reduce" #-}
+{-# ANN scanError ("HLint: ignore Eta reduce" :: String) #-}
 
-report :: Lox -> Int -> String -> String -> IO ()
+report :: Lox -> Int -> Text -> Text -> IO ()
 report lox line location message = do
-  hPutStrLn stderr $ "[line " ++ show line ++ "] Error" ++ location
-                     ++ ": " ++ message
+  T.hPutStrLn stderr $ T.concat [ "[line ", T.pack (show line)
+                                , "] Error" ,location
+                                , ": ", message ]
   writeIORef (hadError lox) True
 
-tokenError :: Lox -> Token -> String -> IO ()
+tokenError :: Lox -> Token -> Text -> IO ()
 tokenError lox t m =
   if tokenType t == TT.Eof
     then report lox (tokenLine t) " at end" m
-    else report lox (tokenLine t) (" at '" ++ tokenLexeme t ++ "'") m
+    else report lox (tokenLine t) (T.concat [" at '",tokenLexeme t,"'"]) m
 
 runtimeError :: Lox -> RuntimeError -> IO ()
 runtimeError lox (RuntimeError token message) = do
-  hPutStrLn stderr $ message ++ "\n[line " ++ show (tokenLine token) ++ "]"
+  T.hPutStrLn stderr $ T.concat [ message
+                                , "\n[line "
+                                , T.pack (show (tokenLine token))
+                                , "]" ]
   writeIORef (hadRuntimeError lox) True

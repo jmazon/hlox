@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Resolver (newResolver,resolve) where
 
 import qualified Data.HashMap.Strict as H
@@ -8,6 +9,7 @@ import Data.Maybe
 import Data.Functor
 import Control.Monad
 import Data.Unique
+import Data.Text (Text)
 
 import Util
 import Token (Token,tokenLexeme)
@@ -16,13 +18,13 @@ import Stmt
 
 data FunctionType = FT_None | FT_Function | FT_Method | FT_Initializer
 data ClassType = CT_None | CT_Class | CT_Subclass
-{-# ANN type FunctionType "HLint: ignore Use camelCase" #-}
-{-# ANN type ClassType "HLint: ignore Use camelCase" #-}
+{-# ANN type FunctionType ("HLint: ignore Use camelCase" :: String) #-}
+{-# ANN type ClassType ("HLint: ignore Use camelCase" :: String) #-}
 
 data Resolver = Resolver
-                { resolverError :: Token -> String -> IO ()
+                { resolverError :: Token -> Text -> IO ()
                 , resolverLocals :: IORef [(Unique,Int)]
-                , resolverScopes :: Stack (HashMap String Bool)
+                , resolverScopes :: Stack (HashMap Text Bool)
                 , resolverCurrentFunction :: IORef FunctionType
                 , resolverCurrentClass :: IORef ClassType }
 
@@ -31,7 +33,7 @@ resolve r statements = do
   mapM_ (resolveS r) statements
   readIORef (resolverLocals r)
 
-newResolver :: (Token -> String -> IO a) -> IO Resolver
+newResolver :: (Token -> Text -> IO a) -> IO Resolver
 newResolver tokenError = liftM4 (Resolver (fmap void . tokenError))
                            (newIORef [])
                            emptyStack (newIORef FT_None) (newIORef CT_None)

@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Scanner (newScanner,scanTokens) where
 
 import Data.Bool
@@ -16,7 +17,7 @@ import qualified TokenType as TT
 import TokenType (TokenType)
 
 data Scanner = Scanner {
-    scannerError :: Int -> String -> IO ()
+    scannerError :: Int -> Text -> IO ()
   , scannerSource :: Text
   , scannerTokens :: IORef [Token]
   , scannerStart :: IORef Int
@@ -24,7 +25,7 @@ data Scanner = Scanner {
   , scannerLine :: IORef Int
   }
 
-newScanner :: (Int -> String -> IO ()) -> Text -> IO Scanner
+newScanner :: (Int -> Text -> IO ()) -> Text -> IO Scanner
 newScanner err source = liftM4 (Scanner err source)
                           (newIORef [])
                           (newIORef 0)
@@ -59,7 +60,7 @@ addTokenLit s tokType literal = do
             (readIORef (scannerStart s))
             (readIORef (scannerCurrent s))
   l <- readIORef (scannerLine s)
-  modifyIORef (scannerTokens s) (++ [Token tokType (T.unpack text) literal l])
+  modifyIORef (scannerTokens s) (++ [Token tokType text literal l])
   
 scanToken :: Scanner -> IO ()
 scanToken s = do
@@ -186,19 +187,19 @@ substr :: Text -> Int -> Int -> Text
 substr str start end = T.take (end-start) (T.drop start str)
 
 keywords :: HashMap Text TokenType
-keywords = M.fromList [ (T.pack "and", TT.And)
-                      , (T.pack "class", TT.Class)
-                      , (T.pack "else", TT.Else)
-                      , (T.pack "false", TT.False)
-                      , (T.pack "for", TT.For)
-                      , (T.pack "fun", TT.Fun)
-                      , (T.pack "if", TT.If)
-                      , (T.pack "nil", TT.Nil)
-                      , (T.pack "or", TT.Or)
-                      , (T.pack "print", TT.Print)
-                      , (T.pack "return", TT.Return)
-                      , (T.pack "super", TT.Super)
-                      , (T.pack "this", TT.This)
-                      , (T.pack "true", TT.True)
-                      , (T.pack "var", TT.Var)
-                      , (T.pack "while", TT.While) ]
+keywords = M.fromList [ ("and",    TT.And)
+                      , ("class",  TT.Class)
+                      , ("else",   TT.Else)
+                      , ("false",  TT.False)
+                      , ("for",    TT.For)
+                      , ("fun",    TT.Fun)
+                      , ("if",     TT.If)
+                      , ("nil",    TT.Nil)
+                      , ("or",     TT.Or)
+                      , ("print",  TT.Print)
+                      , ("return", TT.Return)
+                      , ("super",  TT.Super)
+                      , ("this",   TT.This)
+                      , ("true",   TT.True)
+                      , ("var",    TT.Var)
+                      , ("while",  TT.While) ]

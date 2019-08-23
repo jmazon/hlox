@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module LoxClass (LoxClass,className,newClass,findMethod) where
 
 import Data.HashMap.Strict (HashMap)
@@ -6,14 +7,15 @@ import Control.Monad
 import Control.Applicative
 import Data.Unique
 import Data.Dynamic
+import Data.Text (Text)
 
 import LoxCallable (LoxCallable,arity,call,toString,callableId)
 import LoxFunction (LoxFunction,bind)
 import {-# SOURCE #-} LoxInstance (newInstance)
 
-data LoxClass = LoxClass { className :: String
+data LoxClass = LoxClass { className :: Text
                          , classSuperclass :: Maybe LoxClass
-                         , classMethods :: HashMap String LoxFunction
+                         , classMethods :: HashMap Text LoxFunction
                          , classId :: Unique }
 
 instance LoxCallable LoxClass where
@@ -28,9 +30,9 @@ instance LoxCallable LoxClass where
   toString = className
   callableId = classId
 
-newClass :: String -> Maybe LoxClass -> HashMap String LoxFunction -> IO LoxClass
+newClass :: Text -> Maybe LoxClass -> HashMap Text LoxFunction -> IO LoxClass
 newClass name super methods = LoxClass name super methods <$> newUnique
 
-findMethod :: LoxClass -> String -> Maybe LoxFunction
+findMethod :: LoxClass -> Text -> Maybe LoxFunction
 findMethod c name = H.lookup name (classMethods c) <|>
                     (classSuperclass c >>= \sc -> findMethod sc name)

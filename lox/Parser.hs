@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections,ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections,ScopedTypeVariables,OverloadedStrings #-}
 module Parser (newParser,parse) where
 
 import Prelude hiding (or,and)
@@ -7,6 +7,8 @@ import Data.IORef
 import Data.Unique
 import Control.Monad.Cont
 import Control.Exception
+import Data.Text (Text)
+import qualified Data.Text as T
 
 import Util
 import qualified TokenType as TT
@@ -19,12 +21,12 @@ data ParseError = ParseError deriving Show
 instance Exception ParseError
 
 data Parser = Parser {
-    parserError :: Token -> String -> IO ()
+    parserError :: Token -> Text -> IO ()
   , parserTokens :: [Token]
   , parserCurrent :: IORef Int
   }
 
-newParser :: (Token -> String -> IO ()) -> [Token] -> IO Parser
+newParser :: (Token -> Text -> IO ()) -> [Token] -> IO Parser
 newParser tokenError tokens = Parser tokenError tokens <$> newIORef 0
 
 parse :: Parser -> IO [Stmt]
@@ -72,7 +74,7 @@ forStatement p = do
                  Just <$> expressionStatement p
   condition <- ifM (not <$> check p TT.Semicolon) (Just <$> expression p)
                                                   (return Nothing)
-  consume_ p TT.Semicolon "Expect ';' after loop confition."
+  consume_ p TT.Semicolon "Expect ';' after loop condition."
   increment <- ifM (not <$> check p TT.RightParen) (Just <$> expression p)
                                                    (return Nothing)
   consume_ p TT.RightParen "Expect ')' after for clauses."
@@ -107,7 +109,7 @@ returnStatement :: Parser -> IO Stmt
 returnStatement p = do
   keyword <- previous p
   value <- ifM (not <$> check p TT.Semicolon) (Just <$> expression p) (return Nothing)
-  consume_ p TT.Semicolon "Expecct ';' after return value."
+  consume_ p TT.Semicolon "Expect ';' after return value."
   return (Return keyword value)
 
 varDeclaration :: Parser -> IO Stmt
@@ -132,10 +134,10 @@ expressionStatement p = do
   consume_ p TT.Semicolon "Expect ';' after expression."
   return (Expression expr)
 
-function :: Parser -> String -> IO FunDecl
+function :: Parser -> Text -> IO FunDecl
 function p kind = do
-  name <- consume p TT.Identifier $ "Expect " ++ kind ++ " name."
-  consume_ p TT.LeftParen $ "Expect '(' after " ++ kind ++ " name."
+  name <- consume p TT.Identifier (T.concat ["Expect ",kind," name."])
+  consume_ p TT.LeftParen (T.concat ["Expect '(' after ",kind," name."])
 
   let f (i::Int) = flip (ifM (match p [TT.Comma])) (return Nothing) $ do
         when (i >= 255) $ void $ parseError p "Cannot have more than 255 parameters." =<< peek p
@@ -146,7 +148,7 @@ function p kind = do
 
   consume_ p TT.RightParen "Expect ')' after parameters."
 
-  consume_ p TT.LeftBrace $ "Expect '{' before " ++ kind ++ " body."
+  consume_ p TT.LeftBrace (T.concat ["Expect '{' before ",kind," body."])
   body <- block p
   return (FunDecl name parameters body)
 
@@ -245,7 +247,7 @@ primary p = caseM
   
 binary :: Parser -> [TokenType] -> (Parser -> IO Expr) -> IO Expr
 binary p tokens next = leftAssoc p tokens Binary next
-{-# ANN binary "HLint: ignore Eta reduce" #-}
+{-# ANN binary ("HLint: ignore Eta reduce" :: String) #-}
 
 leftAssoc :: Parser -> [TokenType] -> (Expr -> Token -> Expr -> Expr) -> (Parser -> IO Expr) -> IO Expr
 leftAssoc p tokens node next = do
@@ -262,11 +264,11 @@ match p = anyM f where
            when c $ advance_ p
            return c
 
-consume_ :: Parser -> TokenType -> String -> IO ()
+consume_ :: Parser -> TokenType -> Text -> IO ()
 consume_ p tt msg = do
   c <- check p tt
   if c then advance_ p else throwIO =<< parseError p msg =<< peek p
-consume :: Parser -> TokenType -> String -> IO Token
+consume :: Parser -> TokenType -> Text -> IO Token
 consume p tt msg = do
   consume_ p tt msg
   previous p
@@ -296,7 +298,7 @@ peek p = (parserTokens p !!) <$> readIORef (parserCurrent p)
 previous :: Parser -> IO Token
 previous p = (parserTokens p !!) . pred <$> readIORef (parserCurrent p)
 
-parseError :: Parser -> String -> Token -> IO ParseError
+parseError :: Parser -> Text -> Token -> IO ParseError
 parseError p msg tok = do
   parserError p tok msg
   return ParseError

@@ -1,9 +1,9 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Interpreter (Interpreter(Interpreter),newInterpreter,interpret,executeBlock,resolveLocals) where
 
-import Data.Char (toLower)
-import Data.List (isSuffixOf,foldl')
+import Data.List (foldl')
 import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
 import Data.IORef
@@ -17,6 +17,7 @@ import Data.Dynamic
 import Control.Applicative
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 
 import Util
 import qualified TokenType as TT
@@ -77,7 +78,7 @@ evaluate i (Super _ key method) = do
   Just object <- fromDynamic <$> getAt (interpreterEnvironment i) (distance - 1) "this"
   case findMethod superclass (tokenLexeme method) of
     Just m -> toDyn <$> bind m object
-    Nothing -> throwIO (RuntimeError method ("Undefined property '" ++ tokenLexeme method ++ "'."))
+    Nothing -> throwIO (RuntimeError method (T.concat ["Undefined property '",tokenLexeme method,"'."]))
 evaluate i (This keyword key) = lookupVariable i keyword key
 evaluate i (Grouping expr) = evaluate i expr
 evaluate i (Unary operator right) = do
@@ -119,9 +120,11 @@ evaluate i (Call callee paren arguments) = do
     Nothing -> throwIO $ RuntimeError paren "Can only call functions and classes."
     Just (IsCallable function) -> do
       when (length arguments /= arity function) $
-        throwIO $ RuntimeError paren $ "Expected " ++ show (arity function) ++
-                                       " arguments but got " ++
-                                       show (length arguments) ++ "."
+        throwIO $ RuntimeError paren $ T.concat [ "Expected "
+                                                , T.pack (show (arity function))
+                                                , " arguments but got "
+                                                , T.pack (show (length arguments))
+                                                , "." ]
       call function i as
 
 execute :: Interpreter -> Stmt -> IO ()
@@ -153,7 +156,7 @@ execute i (If condition thenBranch elseBranch) = do
     else maybe (pure ()) (execute i) elseBranch
 execute i (Print value) = do
   v <- evaluate i value
-  putStrLn (stringify v)
+  T.putStrLn (stringify v)
 execute i (Stmt.Return _ value) = do
   v <- maybe (return (toDyn ())) (evaluate i) value
   throwIO (Return.Return v)
@@ -204,16 +207,16 @@ isEqual a b
   | Just (IsCallable ca) <- dynToCallable a, Just (IsCallable cb) <- dynToCallable b = callableId ca == callableId cb
   | otherwise = False
 
-stringify :: Dynamic -> String
+stringify :: Dynamic -> Text
 stringify v
   | Just () <- fromDynamic v = "nil"
-  | Just (b :: Bool) <- fromDynamic v = map toLower (show b)
-  | Just (d :: Double) <- fromDynamic v = case showFFloat Nothing d "" of
-      s | ".0" `isSuffixOf` s -> init (init s)
+  | Just (b :: Bool) <- fromDynamic v = T.toLower (T.pack (show b))
+  | Just (d :: Double) <- fromDynamic v = case T.pack (showFFloat Nothing d "") of
+      s | ".0" `T.isSuffixOf` s -> T.init (T.init s)
         | otherwise -> s
-  | Just (t :: Text) <- fromDynamic v = T.unpack t
+  | Just (t :: Text) <- fromDynamic v = t
   | Just (IsCallable c) <- dynToCallable v = toString c
-  | Just (i :: LoxInstance) <- fromDynamic v = LoxClass.className (instanceClass i) ++ " instance"
+  | Just (i :: LoxInstance) <- fromDynamic v = LoxClass.className (instanceClass i) `T.append` " instance"
   | otherwise = error "Internal error: unknown type to stringify" -- XXX
 
 data Native = Native { nativeArity :: Int

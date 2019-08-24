@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Scanner (scanTokens) where
 
@@ -10,6 +11,8 @@ import Data.Char (isAsciiLower,isAsciiUpper)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as T
+import Control.Monad.Writer
+import Data.DList
 
 import Util
 import Token (Token(Token),Literal(LNull,LNumber,LString))
@@ -17,30 +20,34 @@ import qualified TokenType as TT
 import TokenType (TokenType)
 
 data Scanner = Scanner {
-    scannerError :: Int -> Text -> IO ()
-  , scannerSource :: Text
+    scannerSource :: Text
   , scannerTokens :: IORef [Token]
   , scannerStart :: IORef Int
   , scannerCurrent :: IORef Int
   , scannerLine :: IORef Int
   }
 
-newScanner :: (Int -> Text -> IO ()) -> Text -> IO Scanner
-newScanner err source = liftM4 (Scanner err source)
-                          (newIORef [])
-                          (newIORef 0)
-                          (newIORef 0)
-                          (newIORef 1)
+type ScanError = (Int,Text)
 
-scanTokens :: (Int -> Text -> IO ()) -> Text -> IO [Token]
-scanTokens err source = do
-  s <- newScanner err source
-  whileM_ (not <$> isAtEnd s) $ do
-    writeIORef (scannerStart s) =<< readIORef (scannerCurrent s)
+scanError :: MonadWriter (DList ScanError) m => Int -> Text -> m ()
+scanError line msg = tell (singleton (line,msg))
+
+newScanner :: Text -> IO Scanner
+newScanner source = liftM4 (Scanner source)
+                      (newIORef [])
+                      (newIORef 0)
+                      (newIORef 0)
+                      (newIORef 1)
+
+scanTokens :: Text -> IO ([Token],DList ScanError)
+scanTokens source = runWriterT $ do
+  s <- liftIO $ newScanner source
+  whileM_ (liftIO $ not <$> isAtEnd s) $ do
+    liftIO $ writeIORef (scannerStart s) =<< readIORef (scannerCurrent s)
     scanToken s
-  l <- readIORef (scannerLine s)
-  modifyIORef (scannerTokens s) (++ [Token TT.Eof "" LNull l])
-  readIORef (scannerTokens s)
+  l <- liftIO $ readIORef (scannerLine s)
+  liftIO $ modifyIORef (scannerTokens s) (++ [Token TT.Eof "" LNull l])
+  liftIO $ readIORef (scannerTokens s)
   
 isAtEnd :: Scanner -> IO Bool
 isAtEnd s = (>= T.length (scannerSource s)) <$> readIORef (scannerCurrent s)
@@ -63,41 +70,41 @@ addTokenLit s tokType literal = do
   l <- readIORef (scannerLine s)
   modifyIORef (scannerTokens s) (++ [Token tokType text literal l])
   
-scanToken :: Scanner -> IO ()
+scanToken :: (MonadWriter (DList ScanError) m,MonadIO m) => Scanner -> m ()
 scanToken s = do
-  c <- advance s
-  case c of '(' -> addToken s TT.LeftParen
-            ')' -> addToken s TT.RightParen
-            '{' -> addToken s TT.LeftBrace
-            '}' -> addToken s TT.RightBrace
-            ',' -> addToken s TT.Comma
-            '.' -> addToken s TT.Dot
-            '-' -> addToken s TT.Minus
-            '+' -> addToken s TT.Plus
-            ';' -> addToken s TT.Semicolon
-            '*' -> addToken s TT.Star
-            '!' -> addToken s . bool TT.Bang TT.BangEqual =<< match s '='
-            '=' -> addToken s . bool TT.Equal TT.EqualEqual =<< match s '='
-            '<' -> addToken s . bool TT.Less TT.LessEqual =<< match s '='
-            '>' -> addToken s . bool TT.Greater TT.GreaterEqual =<< match s '='
+  c <- liftIO $ advance s
+  case c of '(' -> liftIO $ addToken s TT.LeftParen
+            ')' -> liftIO $ addToken s TT.RightParen
+            '{' -> liftIO $ addToken s TT.LeftBrace
+            '}' -> liftIO $ addToken s TT.RightBrace
+            ',' -> liftIO $ addToken s TT.Comma
+            '.' -> liftIO $ addToken s TT.Dot
+            '-' -> liftIO $ addToken s TT.Minus
+            '+' -> liftIO $ addToken s TT.Plus
+            ';' -> liftIO $ addToken s TT.Semicolon
+            '*' -> liftIO $ addToken s TT.Star
+            '!' -> liftIO $ addToken s . bool TT.Bang TT.BangEqual =<< match s '='
+            '=' -> liftIO $ addToken s . bool TT.Equal TT.EqualEqual =<< match s '='
+            '<' -> liftIO $ addToken s . bool TT.Less TT.LessEqual =<< match s '='
+            '>' -> liftIO $ addToken s . bool TT.Greater TT.GreaterEqual =<< match s '='
             '/' -> do
-              sl <- match s '/'
-              if sl then whileM_ (andM [(/= '\n') <$> peek s,
-                                        not <$> isAtEnd s])
-                           (advance_ s)
-                else addToken s TT.Slash
+              sl <- liftIO $ match s '/'
+              if sl then whileM_ (liftIO $ andM [(/= '\n') <$> peek s,
+                                                 not <$> isAtEnd s])
+                           (liftIO $ advance_ s)
+                else liftIO $ addToken s TT.Slash
             -- Ignore whitespace.
             ' ' -> return ()
             '\r' -> return ()
             '\t' -> return ()
-            '\n' -> modifyIORef (scannerLine s) succ
+            '\n' -> liftIO $ modifyIORef (scannerLine s) succ
 
             '"' -> string s
 
-            _ | isDigit c -> number s
-              | isAlpha c -> identifier s
-              | otherwise -> readIORef (scannerLine s) >>= \l ->
-                             scannerError s l "Unexpected character."
+            _ | isDigit c -> liftIO $ number s
+              | isAlpha c -> liftIO $ identifier s
+              | otherwise -> liftIO (readIORef (scannerLine s)) >>= \l ->
+                             scanError l "Unexpected character."
 
 identifier :: Scanner -> IO ()
 identifier s = do
@@ -127,29 +134,29 @@ number s = do
       (readIORef (scannerCurrent s))
     where readRat t = n where Right (n,_) = T.rational t
 
-string :: Scanner ->  IO ()
+string :: (MonadWriter (DList ScanError) m,MonadIO m) => Scanner -> m ()
 string s = do
-  whileM_ (andM [(/= '"') <$> peek s
+  liftIO $ whileM_ (andM [(/= '"') <$> peek s
                 , not <$> isAtEnd s]) $ do
     nl <- (== '\n') <$> peek s
     when nl $ modifyIORef (scannerLine s) succ
     advance_ s
 
   -- Unterminated string
-  ae <- isAtEnd s
+  ae <- liftIO $ isAtEnd s
   if ae then do
-    l <- readIORef (scannerLine s)
-    scannerError s l "Unterminated string."
+    l <- liftIO $ readIORef (scannerLine s)
+    scanError l "Unterminated string."
       else do
 
     -- The closing "
-    advance_ s
+    liftIO $ advance_ s
 
     -- Trim the surrounding quotes
-    value <- liftM2 (substr (scannerSource s))
-               (succ <$> readIORef (scannerStart s))
-               (pred <$> readIORef (scannerCurrent s))
-    addTokenLit s TT.String (LString value)
+    value <- liftIO $  liftM2 (substr (scannerSource s))
+                        (succ <$> readIORef (scannerStart s))
+                        (pred <$> readIORef (scannerCurrent s))
+    liftIO $ addTokenLit s TT.String (LString value)
 
 match :: Scanner -> Char -> IO Bool
 match s c = do

@@ -3,7 +3,6 @@
 module Scanner (scanTokens) where
 
 import Data.Bool
-import Data.IORef
 import Control.Monad
 import qualified Data.HashMap.Strict as M
 import Data.HashMap.Strict (HashMap)
@@ -11,7 +10,7 @@ import Data.Char (isAsciiLower,isAsciiUpper)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as T
-import Control.Monad.Writer
+import Control.Monad.RWS.Strict
 import Data.DList
 
 import Util
@@ -19,168 +18,134 @@ import Token (Token(Token),Literal(LNull,LNumber,LString))
 import qualified TokenType as TT
 import TokenType (TokenType)
 
-data Scanner = Scanner {
-    scannerSource :: Text
-  , scannerTokens :: IORef [Token]
-  , scannerStart :: IORef Int
-  , scannerCurrent :: IORef Int
-  , scannerLine :: IORef Int
-  }
+type MS = RWS Text (DList Token,DList (Int,Text)) ScannerState
 
-type ScanError = (Int,Text)
+data ScannerState = ScannerState { start :: !Int, current :: !Int, line :: !Int }
 
-scanError :: MonadWriter (DList ScanError) m => Int -> Text -> m ()
-scanError line msg = tell (singleton (line,msg))
+scanError :: Text -> MS ()
+scanError msg = get >>= \s -> tell (empty,singleton (line s,msg))
 
-newScanner :: Text -> IO Scanner
-newScanner source = liftM4 (Scanner source)
-                      (newIORef [])
-                      (newIORef 0)
-                      (newIORef 0)
-                      (newIORef 1)
-
-scanTokens :: Text -> IO ([Token],DList ScanError)
-scanTokens source = runWriterT $ do
-  s <- liftIO $ newScanner source
-  whileM_ (liftIO $ not <$> isAtEnd s) $ do
-    liftIO $ writeIORef (scannerStart s) =<< readIORef (scannerCurrent s)
-    scanToken s
-  l <- liftIO $ readIORef (scannerLine s)
-  liftIO $ modifyIORef (scannerTokens s) (++ [Token TT.Eof "" LNull l])
-  liftIO $ readIORef (scannerTokens s)
+scanTokens :: Text -> (DList Token,DList (Int,Text))
+scanTokens source = snd $ execRWS m source (ScannerState 0 0 1) where
+  m = do whileM_ (not <$> isAtEnd) $ do
+           modify (\s -> s { start = current s })
+           scanToken
+         l <- gets line
+         tell (singleton (Token TT.Eof "" LNull l),empty)
   
-isAtEnd :: Scanner -> IO Bool
-isAtEnd s = (>= T.length (scannerSource s)) <$> readIORef (scannerCurrent s)
+isAtEnd :: MS Bool
+isAtEnd = liftM2 (>=) (gets current) (asks T.length)
 
-advance_ :: Scanner -> IO ()
-advance_ s = modifyIORef (scannerCurrent s) succ
-advance :: Scanner -> IO Char
-advance s = do
-  advance_ s
-  T.index (scannerSource s) . pred <$> readIORef (scannerCurrent s)
+advance_ :: MS ()
+advance_ = modify (\s -> s { current = current s + 1 })
+advance :: MS Char
+advance = do
+  advance_
+  liftM2 T.index ask (pred . current <$> get)
 
-addToken :: Scanner -> TT.TokenType -> IO ()
-addToken s tokType = addTokenLit s tokType LNull
+addToken :: TT.TokenType -> MS ()
+addToken tokType = addTokenLit tokType LNull
 
-addTokenLit :: Scanner -> TT.TokenType -> Literal -> IO ()
-addTokenLit s tokType literal = do
-  text <- liftM2 (substr (scannerSource s))
-            (readIORef (scannerStart s))
-            (readIORef (scannerCurrent s))
-  l <- readIORef (scannerLine s)
-  modifyIORef (scannerTokens s) (++ [Token tokType text literal l])
-  
-scanToken :: (MonadWriter (DList ScanError) m,MonadIO m) => Scanner -> m ()
-scanToken s = do
-  c <- liftIO $ advance s
-  case c of '(' -> liftIO $ addToken s TT.LeftParen
-            ')' -> liftIO $ addToken s TT.RightParen
-            '{' -> liftIO $ addToken s TT.LeftBrace
-            '}' -> liftIO $ addToken s TT.RightBrace
-            ',' -> liftIO $ addToken s TT.Comma
-            '.' -> liftIO $ addToken s TT.Dot
-            '-' -> liftIO $ addToken s TT.Minus
-            '+' -> liftIO $ addToken s TT.Plus
-            ';' -> liftIO $ addToken s TT.Semicolon
-            '*' -> liftIO $ addToken s TT.Star
-            '!' -> liftIO $ addToken s . bool TT.Bang TT.BangEqual =<< match s '='
-            '=' -> liftIO $ addToken s . bool TT.Equal TT.EqualEqual =<< match s '='
-            '<' -> liftIO $ addToken s . bool TT.Less TT.LessEqual =<< match s '='
-            '>' -> liftIO $ addToken s . bool TT.Greater TT.GreaterEqual =<< match s '='
+addTokenLit :: TT.TokenType -> Literal -> MS ()
+addTokenLit tokType literal = do
+  text <- lexeme
+  l <- gets line
+  tell (singleton (Token tokType text literal l),empty)
+
+lexeme :: MS Text
+lexeme = do
+  source <- ask
+  s <- get
+  return (substr source (start s) (current s))
+
+scanToken :: MS ()
+scanToken = do
+  c <- advance
+  case c of '(' -> addToken TT.LeftParen
+            ')' -> addToken TT.RightParen
+            '{' -> addToken TT.LeftBrace
+            '}' -> addToken TT.RightBrace
+            ',' -> addToken TT.Comma
+            '.' -> addToken TT.Dot
+            '-' -> addToken TT.Minus
+            '+' -> addToken TT.Plus
+            ';' -> addToken TT.Semicolon
+            '*' -> addToken TT.Star
+            '!' -> addToken . bool TT.Bang    TT.BangEqual    =<< match '='
+            '=' -> addToken . bool TT.Equal   TT.EqualEqual   =<< match '='
+            '<' -> addToken . bool TT.Less    TT.LessEqual    =<< match '='
+            '>' -> addToken . bool TT.Greater TT.GreaterEqual =<< match '='
             '/' -> do
-              sl <- liftIO $ match s '/'
-              if sl then whileM_ (liftIO $ andM [(/= '\n') <$> peek s,
-                                                 not <$> isAtEnd s])
-                           (liftIO $ advance_ s)
-                else liftIO $ addToken s TT.Slash
+              sl <- match '/'
+              if sl then whileM_ (andM [(/= '\n') <$> peek,not <$> isAtEnd])
+                           advance_
+                else addToken TT.Slash
             -- Ignore whitespace.
             ' ' -> return ()
             '\r' -> return ()
             '\t' -> return ()
-            '\n' -> liftIO $ modifyIORef (scannerLine s) succ
+            '\n' -> modify (\s -> s { line = line s + 1 })
 
-            '"' -> string s
+            '"' -> string
 
-            _ | isDigit c -> liftIO $ number s
-              | isAlpha c -> liftIO $ identifier s
-              | otherwise -> liftIO (readIORef (scannerLine s)) >>= \l ->
-                             scanError l "Unexpected character."
+            _ | isDigit c -> number
+              | isAlpha c -> identifier
+              | otherwise -> scanError "Unexpected character."
 
-identifier :: Scanner -> IO ()
-identifier s = do
-  whileM_ (isAlphaNumeric <$> peek s) (advance_ s)
+identifier :: MS ()
+identifier = do
+  whileM_ (isAlphaNumeric <$> peek) advance_
 
   -- See if the identifier is a reserved word
-  text <- liftM2 (substr (scannerSource s))
-            (readIORef (scannerStart s))
-            (readIORef (scannerCurrent s))
-  addToken s $ M.lookupDefault TT.Identifier text keywords
+  text <- lexeme
+  addToken $ M.lookupDefault TT.Identifier text keywords
 
-number :: Scanner -> IO ()
-number s = do
-  whileM_ (isDigit <$> peek s) (advance_ s)
+number :: MS ()
+number = do
+  whileM_ (isDigit <$> peek) advance_
 
   -- Look for a fractional part
-  f <- andM [ (== '.') <$> peek s
-            , isDigit <$> peekNext s ]
+  f <- andM [(== '.') <$> peek,isDigit <$> peekNext]
   when f $ do
     -- Consume the "."
-    advance_ s
-    whileM_ (isDigit <$> peek s) (advance_ s)
+    advance_
+    whileM_ (isDigit <$> peek) advance_
 
-  addTokenLit s TT.Number . LNumber . readRat =<<
-    liftM2 (substr (scannerSource s))
-      (readIORef (scannerStart s))
-      (readIORef (scannerCurrent s))
+  addTokenLit TT.Number . LNumber . readRat =<< lexeme
     where readRat t = n where Right (n,_) = T.rational t
 
-string :: (MonadWriter (DList ScanError) m,MonadIO m) => Scanner -> m ()
-string s = do
-  liftIO $ whileM_ (andM [(/= '"') <$> peek s
-                , not <$> isAtEnd s]) $ do
-    nl <- (== '\n') <$> peek s
-    when nl $ modifyIORef (scannerLine s) succ
-    advance_ s
+string :: MS ()
+string = do
+  whileM_ (andM [(/= '"') <$> peek,not <$> isAtEnd]) $ do
+    nl <- (== '\n') <$> peek
+    when nl $ modify (\s -> s { line = line s + 1 })
+    advance_
 
   -- Unterminated string
-  ae <- liftIO $ isAtEnd s
-  if ae then do
-    l <- liftIO $ readIORef (scannerLine s)
-    scanError l "Unterminated string."
-      else do
-
+  ifM isAtEnd (scanError "Unterminated string.") $ do
     -- The closing "
-    liftIO $ advance_ s
+    advance_
 
     -- Trim the surrounding quotes
-    value <- liftIO $  liftM2 (substr (scannerSource s))
-                        (succ <$> readIORef (scannerStart s))
-                        (pred <$> readIORef (scannerCurrent s))
-    liftIO $ addTokenLit s TT.String (LString value)
+    source <- ask
+    s <- get
+    let value = substr source (start s + 1) (current s - 1)
+    addTokenLit TT.String (LString value)
 
-match :: Scanner -> Char -> IO Bool
-match s c = do
-  ae <- isAtEnd s
-  if ae then return False else do
-    cur <- readIORef (scannerCurrent s)
-    let c' = scannerSource s `T.index` cur
-    if c' /= c then return False else do
-      modifyIORef (scannerCurrent s) succ
-      return True
+match :: Char -> MS Bool
+match c = ifM isAtEnd (return False) $ do
+            c' <- liftM2 T.index ask (gets current)
+            if c' /= c then return False else do
+              modify (\s -> s { current = current s + 1})
+              return True
 
-peek :: Scanner -> IO Char
-peek s = do
-  ae <- isAtEnd s
-  if ae
-    then return '\0'
-    else T.index (scannerSource s) <$> readIORef (scannerCurrent s)
+peek :: MS Char
+peek = ifM isAtEnd (return '\0') (liftM2 T.index ask (gets current))
 
-peekNext :: Scanner -> IO Char
-peekNext s = do
-  c <- readIORef (scannerCurrent s)
-  if c + 1 >= T.length (scannerSource s)
-    then return '\0'
-    else return (scannerSource s `T.index` (c + 1))
+peekNext :: MS Char
+peekNext = ifM (liftM2 (>=) (gets $ succ . current) (asks T.length))
+             (return '\0')
+             (liftM2 T.index ask (gets $ succ . current))
 
 isAlpha :: Char -> Bool
 isAlpha c = isAsciiLower c || isAsciiUpper c || c == '_'
@@ -192,7 +157,7 @@ isDigit :: Char -> Bool
 isDigit c = c >= '0' && c <= '9'
 
 substr :: Text -> Int -> Int -> Text
-substr str start end = T.take (end-start) (T.drop start str)
+substr str beg end = T.take (end-beg) (T.drop beg str)
 
 keywords :: HashMap Text TokenType
 keywords = M.fromList [ ("and",    TT.And)

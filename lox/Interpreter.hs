@@ -33,7 +33,7 @@ import Return (Return(Return))
 import LoxCallable (LoxCallable,arity,call,toString,callableId)
 
 data Interpreter = Interpreter { interpreterEnvironment :: Environment
-                               , interpreterLocals :: IORef (HashMap Unique Int)}
+                               , interpreterLocals :: IORef (HashMap ExprKey Int)}
 
 globals :: Environment
 {-# NOINLINE globals #-}
@@ -172,11 +172,11 @@ executeBlock :: Interpreter -> [Stmt] -> Environment -> IO ()
 executeBlock i statements environment =
   forM_ statements $ execute i { interpreterEnvironment = environment }
 
-resolveLocals :: Interpreter -> [(Unique,Int)] -> IO ()
+resolveLocals :: Interpreter -> [(ExprKey,Int)] -> IO ()
 resolveLocals i kvs = modifyIORef (interpreterLocals i) $
                       \h0 -> foldl' (\h (k,v) -> H.insert k v h) h0 kvs
 
-lookupVariable :: Interpreter -> Token -> Unique -> IO Dynamic
+lookupVariable :: Interpreter -> Token -> ExprKey -> IO Dynamic
 lookupVariable i name key = do
   distance <- H.lookup key <$> readIORef (interpreterLocals i)
   case distance of

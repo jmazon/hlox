@@ -8,7 +8,6 @@ import Data.List
 import Data.Maybe
 import Data.Functor
 import Control.Monad
-import Data.Unique
 import Data.Text (Text)
 import Control.Monad.Writer
 import Data.DList
@@ -24,7 +23,7 @@ data ClassType = CT_None | CT_Class | CT_Subclass
 {-# ANN type ClassType ("HLint: ignore Use camelCase" :: String) #-}
 
 data Resolver = Resolver
-                { resolverLocals :: IORef [(Unique,Int)]
+                { resolverLocals :: IORef [(ExprKey,Int)]
                 , resolverScopes :: Stack (HashMap Text Bool)
                 , resolverCurrentFunction :: IORef FunctionType
                 , resolverCurrentClass :: IORef ClassType }
@@ -32,7 +31,7 @@ data Resolver = Resolver
 type ResolverError = (Token,Text)
 type MR = WriterT (DList ResolverError) IO
 
-resolve :: [Stmt] -> IO ([(Unique,Int)],DList ResolverError)
+resolve :: [Stmt] -> IO ([(ExprKey,Int)],DList ResolverError)
 resolve statements = runWriterT $ do
   r <- liftIO newResolver
   mapM_ (resolveS r) statements
@@ -172,7 +171,7 @@ define r name = liftIO $ unlessM (isEmpty (resolverScopes r)) $ do
   scope <- pop (resolverScopes r)
   push (resolverScopes r) (H.insert (tokenLexeme name) True scope)
 
-resolveLocal :: Resolver -> Unique -> Token -> MR ()
+resolveLocal :: Resolver -> ExprKey -> Token -> MR ()
 resolveLocal r key name = do
   f <- liftIO $ findIndex (tokenLexeme name `H.member`) <$> frames (resolverScopes r)
   mapM_ (\f' -> liftIO $ modifyIORef (resolverLocals r) ((key,f'):)) f

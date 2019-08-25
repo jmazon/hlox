@@ -6,7 +6,6 @@ import System.IO
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Data.Foldable
 
 import Scanner (scanTokens)
 import Parser (parse)
@@ -49,7 +48,7 @@ run :: Interpreter -> Text -> IO RunResult
 run interpreter source = do
   let (tokens,scanErrors) = scanTokens source
   mapM_ (uncurry scanError) scanErrors
-  (statements,parseErrors) <- parse (toList tokens)
+  let (statements,parseErrors) = parse tokens
   mapM_ (uncurry tokenError) parseErrors
   if not (null scanErrors && null parseErrors) then return HadError else do
     (locals,resolveErrors) <- resolve statements

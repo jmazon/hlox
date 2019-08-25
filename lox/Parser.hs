@@ -4,13 +4,12 @@ module Parser (parse) where
 
 import Prelude hiding (or,and)
 import Data.Maybe
-import Data.IORef
-import Data.Unique
 import Control.Monad.Cont
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.DList
-import Control.Monad.Writer
+import Data.DList as D
+import Control.Monad.Writer.Strict
+import Control.Monad.State.Strict
 import Control.Monad.Except
 import Data.Either
 
@@ -21,76 +20,69 @@ import Token (Token,tokenLiteral,tokenType,Literal(LNull,LBool))
 import Expr
 import Stmt
 
-data ParseError = ParseError Text Token deriving Show
+data ParseError = ParseError Text Token
 
-data Parser = Parser {
-    parserTokens :: [Token]
-  , parserCurrent :: IORef Int
-  }
+data ParserState = ParserState { tokens     :: !(DList Token)
+                               , nextUnique :: !ExprKey }
 
-type ParserError = (Token,Text)
-type MP = ExceptT ParseError (WriterT (DList ParserError) IO)
+type MP = ExceptT ParseError (StateT ParserState (Writer (DList (Token,Text))))
 
-newParser :: [Token] -> IO Parser
-newParser tokens = Parser tokens <$> newIORef 0
+parse :: DList Token -> ([Stmt],DList (Token,Text))
+parse toks = runWriter $
+  flip evalStateT (ParserState (cons (error "Read before token stream") toks)
+                               (ExprKey 0)) $
+  fmap (fromRight (error "Internal error: leaked ParseError")) $ runExceptT $
+  fmap catMaybes $ whileM (not <$> isAtEnd) declaration
+{-# ANN parse ( "HLint: ignore Use <$>" :: String ) #-}
 
-parse :: [Token] -> IO ([Stmt],DList ParserError)
-parse tokens = do
-  p <- newParser tokens
-  runWriterT $
-    fmap (fromRight (error "Internal error: leaked ParseError")) $ runExceptT $
-    fmap catMaybes $ whileM (not <$> isAtEnd p) $ declaration p
-
-expression :: Parser -> MP Expr
+expression :: MP Expr
 expression = assignment
 
-declaration :: Parser -> MP (Maybe Stmt)
-declaration p =
-  (Just <$> caseM [ (match p [TT.Class],classDeclaration p)
-                  , (match p [TT.Fun],Function <$> function p "function")
-                  , (match p [TT.Var],varDeclaration p) ]
-              (statement p))
+declaration :: MP (Maybe Stmt)
+declaration =
+  (Just <$> caseM [ (match [TT.Class],classDeclaration)
+                  , (match [TT.Fun],Function <$> function "function")
+                  , (match [TT.Var],varDeclaration) ]
+              statement)
     `catchError`
   \(_ :: ParseError) -> do
-    synchronize p
+    synchronize
     return Nothing
 
-classDeclaration :: Parser -> MP Stmt
-classDeclaration p = do
-  name <- consume p TT.Identifier "Expect class name."
-  superclass <- ifM (match p [TT.Less]) (consume_ p TT.Identifier "Expect superclass name." >>
-                                         Just <$> liftM2 Variable (previous p) (liftIO newUnique))
+classDeclaration :: MP Stmt
+classDeclaration = do
+  name <- consume TT.Identifier "Expect class name."
+  superclass <- ifM (match [TT.Less]) (consume_ TT.Identifier "Expect superclass name." >>
+                                         Just <$> liftM2 Variable previous newUnique)
                       (return Nothing)
-  consume_ p TT.LeftBrace "Expect '{' before class body."
-  methods <- whileM (andM [not <$> check p TT.RightBrace,not <$> isAtEnd p]) $
-               function p "method"
-  consume_ p TT.RightBrace "Expect '}' after class body."
+  consume_ TT.LeftBrace "Expect '{' before class body."
+  methods <- whileM (andM [not <$> check TT.RightBrace,not <$> isAtEnd]) $
+               function "method"
+  consume_ TT.RightBrace "Expect '}' after class body."
   return (Class name superclass methods)
 
-statement :: Parser -> MP Stmt
-statement p = caseM
-  [ (match p [TT.For],forStatement p)
-  , (match p [TT.If],ifStatement p)
-  , (match p [TT.Print],printStatement p)
-  , (match p [TT.Return],returnStatement p)
-  , (match p [TT.While],whileStatement p)
-  , (match p [TT.LeftBrace],Block <$> block p)
-  ]
-  (expressionStatement p)
+statement :: MP Stmt
+statement = caseM [ (match [TT.For],forStatement)
+                  , (match [TT.If],ifStatement)
+                  , (match [TT.Print],printStatement)
+                  , (match [TT.Return],returnStatement)
+                  , (match [TT.While],whileStatement)
+                  , (match [TT.LeftBrace],Block <$> block)]
+              expressionStatement
 
-forStatement :: Parser -> MP Stmt
-forStatement p = do
-  consume_ p TT.LeftParen "Expect '(' after 'for'."
-  initializer <- ifM (match p [TT.Semicolon]) (return Nothing) $
-                 ifM (match p [TT.Var]) (Just <$> varDeclaration p) $
-                 Just <$> expressionStatement p
-  condition <- ifM (not <$> check p TT.Semicolon) (Just <$> expression p)
+forStatement :: MP Stmt
+forStatement = do
+  consume_ TT.LeftParen "Expect '(' after 'for'."
+  initializer <- ifM (match [TT.Semicolon]) (return Nothing) $
+                 ifM (match [TT.Var]) (Just <$> varDeclaration) $
+                 Just <$> expressionStatement
+  condition <- ifM (not <$> check TT.Semicolon) (Just <$> expression)
                                                   (return Nothing)
-  consume_ p TT.Semicolon "Expect ';' after loop condition."
-  increment <- ifM (not <$> check p TT.RightParen) (Just <$> expression p)
+  consume_ TT.Semicolon "Expect ';' after loop condition."
+  increment <- ifM (not <$> check TT.RightParen) (Just <$> expression)
                                                    (return Nothing)
-  consume_ p TT.RightParen "Expect ')' after for clauses."
-  body <- statement p
+  consume_ TT.RightParen "Expect ')' after for clauses."
+  body <- statement
 
   let body' = maybe body (\i -> Block [body,Expression i]) increment
       condition' = fromMaybe (Literal $ LBool True) condition
@@ -99,228 +91,230 @@ forStatement p = do
 
   return body'''
   
-ifStatement :: Parser -> MP Stmt
-ifStatement p = do
-  consume_ p TT.LeftParen "Expect '(' after 'if'."
-  condition <- expression p
-  consume_ p TT.RightParen "Expect ')' after if condition."
+ifStatement :: MP Stmt
+ifStatement = do
+  consume_ TT.LeftParen "Expect '(' after 'if'."
+  condition <- expression
+  consume_ TT.RightParen "Expect ')' after if condition."
 
-  thenBranch <- statement p
-  e <- match p [TT.Else]
-  elseBranch <- if e then Just <$> statement p else return Nothing
+  thenBranch <- statement
+  e <- match [TT.Else]
+  elseBranch <- if e then Just <$> statement else return Nothing
 
   return (If condition thenBranch elseBranch)
   
-printStatement :: Parser -> MP Stmt
-printStatement p = do
-  value <- expression p
-  consume_ p TT.Semicolon "Expect ';' after value."
+printStatement :: MP Stmt
+printStatement = do
+  value <- expression
+  consume_ TT.Semicolon "Expect ';' after value."
   return (Print value)
 
-returnStatement :: Parser -> MP Stmt
-returnStatement p = do
-  keyword <- previous p
-  value <- ifM (not <$> check p TT.Semicolon) (Just <$> expression p) (return Nothing)
-  consume_ p TT.Semicolon "Expect ';' after return value."
+returnStatement :: MP Stmt
+returnStatement = do
+  keyword <- previous
+  value <- ifM (not <$> check TT.Semicolon) (Just <$> expression) (return Nothing)
+  consume_ TT.Semicolon "Expect ';' after return value."
   return (Return keyword value)
 
-varDeclaration :: Parser -> MP Stmt
-varDeclaration p = do
-  name <- consume p TT.Identifier "Expect variable name."
-  eq <- match p [TT.Equal]
-  initializer <- if eq then Just <$> expression p else return Nothing
-  consume_ p TT.Semicolon "Expect ';' after variable declaration."
+varDeclaration :: MP Stmt
+varDeclaration = do
+  name <- consume TT.Identifier "Expect variable name."
+  eq <- match [TT.Equal]
+  initializer <- if eq then Just <$> expression else return Nothing
+  consume_ TT.Semicolon "Expect ';' after variable declaration."
   return (Var name initializer)
 
-whileStatement :: Parser -> MP Stmt
-whileStatement p = do
-  consume_ p TT.LeftParen "Expect '(' after 'while'."
-  condition <- expression p
-  consume_ p TT.RightParen "Expect ')' after condition."
-  body <- statement p
+whileStatement :: MP Stmt
+whileStatement = do
+  consume_ TT.LeftParen "Expect '(' after 'while'."
+  condition <- expression
+  consume_ TT.RightParen "Expect ')' after condition."
+  body <- statement
   return (While condition body)
+{-# ANN whileStatement ( "HLint: ignore Use <$>" :: String ) #-}
   
-expressionStatement :: Parser -> MP Stmt
-expressionStatement p = do
-  expr <- expression p
-  consume_ p TT.Semicolon "Expect ';' after expression."
+expressionStatement :: MP Stmt
+expressionStatement = do
+  expr <- expression
+  consume_ TT.Semicolon "Expect ';' after expression."
   return (Expression expr)
 
-function :: Parser -> Text -> MP FunDecl
-function p kind = do
-  name <- consume p TT.Identifier (T.concat ["Expect ",kind," name."])
-  consume_ p TT.LeftParen (T.concat ["Expect '(' after ",kind," name."])
+function :: Text -> MP FunDecl
+function kind = do
+  name <- consume TT.Identifier (T.concat ["Expect ",kind," name."])
+  consume_ TT.LeftParen (T.concat ["Expect '(' after ",kind," name."])
 
-  let f (i::Int) = flip (ifM (match p [TT.Comma])) (return Nothing) $ do
-        when (i >= 255) $ void $ parseError "Cannot have more than 255 parameters." =<< peek p
+  let f (i::Int) = flip (ifM (match [TT.Comma])) (return Nothing) $ do
+        when (i >= 255) $ void $ parseError "Cannot have more than 255 parameters." =<< peek
         Just . (, i+1) <$> c
-      c = consume p TT.Identifier "Expect parameter name."
-  parameters <- ifM (not <$> check p TT.RightParen)
+      c = consume TT.Identifier "Expect parameter name."
+  parameters <- ifM (not <$> check TT.RightParen)
                   (liftM2 (:) c (unfoldrM f 1)) (return [])
 
-  consume_ p TT.RightParen "Expect ')' after parameters."
+  consume_ TT.RightParen "Expect ')' after parameters."
 
-  consume_ p TT.LeftBrace (T.concat ["Expect '{' before ",kind," body."])
-  body <- block p
+  consume_ TT.LeftBrace (T.concat ["Expect '{' before ",kind," body."])
+  body <- block
   return (FunDecl name parameters body)
+{-# ANN function ( "HLint: ignore Use <$>" :: String ) #-}
 
-block :: Parser -> MP [Stmt]
-block p = do
+block :: MP [Stmt]
+block = do
   statements <- catMaybes <$>
-                whileM (andM [not <$> check p TT.RightBrace,not <$> isAtEnd p])
-                  (declaration p)
-  consume_ p TT.RightBrace "Expect '}' after block."
+                whileM (andM [not <$> check TT.RightBrace,not <$> isAtEnd])
+                  declaration
+  consume_ TT.RightBrace "Expect '}' after block."
   return statements
 
-assignment :: Parser -> MP Expr
-assignment p = do
-  expr <- or p
-  eq <- match p [TT.Equal]
+assignment :: MP Expr
+assignment = do
+  expr <- or
+  eq <- match [TT.Equal]
   if eq then do
-      equals <- previous p
-      value <- assignment p
+      equals <- previous
+      value <- assignment
       case expr of Variable name _ -> do
-                     u <- liftIO newUnique
+                     u <- newUnique
                      return (Assign name u value)
                    Get object name -> return (Set object name value)
                    _ -> parseError "Invalid assignment target." equals
                         >> return (Literal LNull)
     else return expr
 
-or,and :: Parser -> MP Expr
-or p = leftAssoc p [TT.Or] Logical and
-and p = leftAssoc p [TT.And] Logical equality
+or,and :: MP Expr
+or = leftAssoc [TT.Or] Logical and
+and = leftAssoc [TT.And] Logical equality
 
-equality :: Parser -> MP Expr
-equality p = binary p [TT.BangEqual,TT.EqualEqual] comparison
+equality :: MP Expr
+equality = binary [TT.BangEqual,TT.EqualEqual] comparison
 
-comparison :: Parser -> MP Expr
-comparison p = binary p [TT.Greater,TT.GreaterEqual,TT.Less,TT.LessEqual]
-                        addition
+comparison :: MP Expr
+comparison = binary [TT.Greater,TT.GreaterEqual,TT.Less,TT.LessEqual]
+                      addition
 
-addition :: Parser -> MP Expr
-addition p = binary p [TT.Minus,TT.Plus] multiplication
+addition :: MP Expr
+addition = binary [TT.Minus,TT.Plus] multiplication
 
-multiplication :: Parser -> MP Expr
-multiplication p = binary p [TT.Slash,TT.Star] unary
+multiplication :: MP Expr
+multiplication = binary [TT.Slash,TT.Star] unary
 
-unary :: Parser -> MP Expr
-unary p = do
-  m <- match p [TT.Bang,TT.Minus]
-  if m then do
-    operator <- previous p
-    right <- unary p
-    return $ Unary operator right
-    else call p
+unary :: MP Expr
+unary = do
+  m <- match [TT.Bang,TT.Minus]
+  if m then liftM2 Unary previous unary else call
 
-finishCall :: Parser -> Expr -> MP Expr
-finishCall p callee = do
-  let f (i::Int) = flip (ifM (match p [TT.Comma])) (return Nothing) $ do
-        when (i >= 255) $ void $ parseError "Cannot have more than 255 arguments." =<< peek p
-        Just . (, i+1) <$> expression p
-  arguments <- ifM (not <$> check p TT.RightParen)
-                 (liftM2 (:) (expression p) (unfoldrM f 1))
+finishCall :: Expr -> MP Expr
+finishCall callee = do
+  let f (i::Int) = flip (ifM (match [TT.Comma])) (return Nothing) $ do
+        when (i >= 255) $ void $ parseError "Cannot have more than 255 arguments." =<< peek
+        Just . (, i+1) <$> expression
+  arguments <- ifM (not <$> check TT.RightParen)
+                 (liftM2 (:) expression (unfoldrM f 1))
                  (return [])
-  paren <- consume p TT.RightParen "Expect ')' after arguments."
+  paren <- consume TT.RightParen "Expect ')' after arguments."
   return (Call callee paren arguments)
 
-call :: Parser -> MP Expr
-call p = flip runContT (liftIO . readIORef) $ do
-  expr <- liftIO . newIORef =<< lift (primary p)
-  callCC $ \exit -> forever $
-    caseM [ (lift $ match p [TT.LeftParen]
-            ,lift $ liftIO . writeIORef expr =<< finishCall p =<< liftIO (readIORef expr))
-          , (lift $ match p [TT.Dot]
-            ,lift $ do name <- consume p TT.Identifier "Expect property name after '.'."
-                       liftIO $ writeIORef expr . flip Get name =<< readIORef expr) ]
+call :: MP Expr
+call = flip runContT pure $ do
+  expr <- lift primary
+  flip execStateT expr $ callCC $ \exit -> forever $
+    caseM [ (lift (lift (match [TT.LeftParen])),put =<< lift . lift . finishCall =<< get)
+          , (lift (lift (match [TT.Dot]))
+            ,do name <- lift $ lift $ consume TT.Identifier "Expect property name after '.'."
+                put . flip Get name =<< get) ]
       (exit ())
-  return expr
 
-primary :: Parser -> MP Expr
-primary p = caseM
-  [ (match p [TT.False],return (Literal (LBool False)))
-  , (match p [TT.True],return (Literal (LBool True)))
-  , (match p [TT.Nil],return (Literal LNull))
-  , (match p [TT.Number],Literal . tokenLiteral <$> previous p)
-  , (match p [TT.String],Literal . tokenLiteral <$> previous p)
-  , (match p [TT.Super],do
-        keyword <- previous p
-        consume_ p TT.Dot "Expect '.' after 'super'."
-        method <- consume p TT.Identifier "Expect superclass method name."
-        key <- liftIO newUnique
+primary :: MP Expr
+primary = caseM
+  [ (match [TT.False],return (Literal (LBool False)))
+  , (match [TT.True],return (Literal (LBool True)))
+  , (match [TT.Nil],return (Literal LNull))
+  , (match [TT.Number],Literal . tokenLiteral <$> previous)
+  , (match [TT.String],Literal . tokenLiteral <$> previous)
+  , (match [TT.Super],do
+        keyword <- previous
+        consume_ TT.Dot "Expect '.' after 'super'."
+        method <- consume TT.Identifier "Expect superclass method name."
+        key <- newUnique
         return (Super keyword key method))
-  , (match p [TT.This],liftM2 This (previous p) (liftIO newUnique))
-  , (match p [TT.Identifier],liftM2 Variable (previous p) (liftIO newUnique))
-  , (match p [TT.LeftParen],do
-        expr <- expression p
-        consume_ p TT.RightParen "Expect ')' after expression."
+  , (match [TT.This],liftM2 This previous newUnique)
+  , (match [TT.Identifier],liftM2 Variable previous newUnique)
+  , (match [TT.LeftParen],do
+        expr <- expression
+        consume_ TT.RightParen "Expect ')' after expression."
         return (Grouping expr)) ]
-  (throwError =<< parseError "Expect expression." =<< peek p)
+  (throwError =<< parseError "Expect expression." =<< peek)
   
-binary :: Parser -> [TokenType] -> (Parser -> MP Expr) -> MP Expr
-binary p tokens next = leftAssoc p tokens Binary next
+binary ::  [TokenType] -> MP Expr -> MP Expr
+binary toks next = leftAssoc toks Binary next
 {-# ANN binary ("HLint: ignore Eta reduce" :: String) #-}
 
-leftAssoc :: Parser -> [TokenType] -> (Expr -> Token -> Expr -> Expr) -> (Parser -> MP Expr) -> MP Expr
-leftAssoc p tokens node next = do
-  expr <- next p
+leftAssoc :: [TokenType] -> (Expr -> Token -> Expr -> Expr) -> MP Expr -> MP Expr
+leftAssoc toks node next = do
+  expr <- next
   fmap (foldl (\l (o,r) -> node l o r) expr) $
-    whileM (match p tokens) $ do
-      operator <- previous p
-      right <- next p
+    whileM (match toks) $ do
+      operator <- previous
+      right <- next
       return (operator,right)
 
-match :: Parser -> [TokenType] -> MP Bool
-match p = anyM f where
-  f t = do c <- check p t
-           when c $ advance_ p
+match :: [TokenType] -> MP Bool
+match = anyM f where
+  f t = do c <- check t
+           when c advance_
            return c
 
-consume_ :: Parser -> TokenType -> Text -> MP ()
-consume_ p tt msg = do
-  c <- check p tt
-  if c then advance_ p else throwError =<< parseError msg =<< peek p
-consume :: Parser -> TokenType -> Text -> MP Token
-consume p tt msg = do
-  consume_ p tt msg
-  previous p
+consume_ :: TokenType -> Text -> MP ()
+consume_ tt msg = do
+  c <- check tt
+  if c then advance_ else throwError =<< parseError msg =<< peek
+consume :: TokenType -> Text -> MP Token
+consume tt msg = do
+  consume_ tt msg
+  previous
 
-check :: Parser -> TokenType -> MP Bool
-check p tt = do
-  ae <- isAtEnd p
-  if ae then return False else (== tt) . tokenType <$> peek p
+check :: TokenType -> MP Bool
+check tt = do
+  ae <- isAtEnd
+  if ae then return False else (== tt) . tokenType <$> peek
 
-advance_ :: Parser -> MP ()
-advance_ p = do
-  ae <- isAtEnd p
-  unless ae $ liftIO $ modifyIORef (parserCurrent p) succ
+advance_ :: MP ()
+advance_ = do
+  ae <- isAtEnd
+  unless ae $ modify (\s -> s { tokens = D.tail (tokens s)})
 
 -- XXX advance is never used
-advance :: Parser -> MP Token
-advance p = do
-  advance_ p
-  previous p
+advance :: MP Token
+advance = do
+  advance_
+  previous
 
-isAtEnd :: Parser -> MP Bool
-isAtEnd p = (== TT.Eof) . tokenType <$> peek p
+isAtEnd :: MP Bool
+isAtEnd = (== TT.Eof) . tokenType <$> peek
 
-peek :: Parser -> MP Token
-peek p = (parserTokens p !!) <$> liftIO (readIORef (parserCurrent p))
+peek :: MP Token
+peek = gets (D.head . D.tail . tokens)
 
-previous :: Parser -> MP Token
-previous p = (parserTokens p !!) . pred <$> liftIO (readIORef (parserCurrent p))
+previous :: MP Token
+previous = gets (D.head . tokens)
 
 parseError :: Text -> Token -> MP ParseError
 parseError msg tok = do
   tell (singleton (tok,msg))
   return (ParseError msg tok)
 
-synchronize :: Parser -> MP ()
-synchronize p = do
-  advance_ p
-  whileM_ (andM [ not <$> isAtEnd p
-                , (/= TT.Semicolon) . tokenType <$> previous p
+synchronize :: MP ()
+synchronize = do
+  advance_
+  whileM_ (andM [ not <$> isAtEnd
+                , (/= TT.Semicolon) . tokenType <$> previous
                 , (`notElem` [TT.Class,TT.Fun,TT.Var,TT.For
                              ,TT.If,TT.While,TT.Print,TT.Return]) . tokenType
-                  <$> peek p ] ) $
-    advance_ p
+                  <$> peek ] )
+    advance_
+
+newUnique :: MP ExprKey
+newUnique = do
+  r@(ExprKey u) <- gets nextUnique
+  modify (\s -> s { nextUnique = ExprKey (u + 1) })
+  return r

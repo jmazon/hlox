@@ -6,7 +6,6 @@ import Data.HashMap.Strict (HashMap)
 import Data.IORef
 import Data.List
 import Data.Maybe
-import Data.Functor
 import Control.Monad
 import Data.Text (Text)
 import Control.Monad.Writer
@@ -24,7 +23,7 @@ data ClassType = CT_None | CT_Class | CT_Subclass
 
 data Resolver = Resolver
                 { resolverLocals :: IORef [(ExprKey,Int)]
-                , resolverScopes :: Stack (HashMap Text Bool)
+                , resolverScopes :: IORef (Stack (HashMap Text Bool))
                 , resolverCurrentFunction :: IORef FunctionType
                 , resolverCurrentClass :: IORef ClassType }
 
@@ -38,41 +37,31 @@ resolve statements = runWriterT $ do
   liftIO $ readIORef (resolverLocals r)
 
 newResolver :: IO Resolver
-newResolver = liftM4 Resolver (newIORef []) emptyStack
+newResolver = liftM4 Resolver (newIORef []) (newIORef emptyStack)
                        (newIORef FT_None) (newIORef CT_None)
 
 resolverError :: Resolver -> Token -> Text -> MR ()
 resolverError _ tok msg = tell $ singleton (tok,msg)
 
 resolveS :: Resolver -> Stmt -> MR ()
-resolveS r (Block statements) = do
-  beginScope r
-  mapM_ (resolveS r) statements
-  endScope r
+resolveS r (Block statements) = withScope r Nothing $ mapM_ (resolveS r) statements
 resolveS r (Class name superclass methods) = do
-  enclosingClass <- liftIO $ readIORef (resolverCurrentClass r)
-  liftIO $ writeIORef (resolverCurrentClass r) CT_Class
+  -- as opposed to jlox, those two performed before currentClass is CT_Class:
   declare r name
   define r name
-  sequence_ $ flip fmap superclass $ \sc ->
-    when (tokenLexeme name == tokenLexeme (variableName sc)) $
-      resolverError r (variableName sc) "A class cannot inherit from itself."
-  liftIO $ sequence_ $ writeIORef (resolverCurrentClass r) CT_Subclass <$ superclass
-  sequence_ $ resolveE r <$> superclass
-  sequence_ $ superclass $> do
-    beginScope r
-    s <- liftIO $ pop (resolverScopes r)
-    liftIO $ push (resolverScopes r) (H.insert "super" True s)
-  beginScope r
-  s <- liftIO $ pop (resolverScopes r)
-  liftIO $ push (resolverScopes r) (H.insert "this" True s)
-  forM_ methods $ \method -> do
-    let declaration | tokenLexeme (functionName method) == "init" = FT_Initializer
-                    | otherwise = FT_Method
-    resolveFunction r method declaration
-  endScope r
-  sequence_ $ endScope r <$ superclass
-  liftIO $ writeIORef (resolverCurrentClass r) enclosingClass
+  scope <- case superclass of
+    Nothing -> return $ withCurrentClass r CT_Class
+    Just sc -> do
+      when (tokenLexeme name == tokenLexeme (variableName sc)) $
+        resolverError r (variableName sc) "A class cannot inherit from itself."
+      -- as opposed to jlox, this performed before currentClass is CT_Subclass:
+      resolveE r sc
+      return $ withCurrentClass r CT_Subclass . withScope r (Just ("super",True))
+  scope $ withScope r (Just ("this",True)) $
+    forM_ methods $ \method -> do
+      let declaration | tokenLexeme (functionName method) == "init" = FT_Initializer
+                      | otherwise = FT_Method
+      resolveFunction r method declaration
 resolveS r (Expression expression) = resolveE r expression
 resolveS r (Function f@(FunDecl name _ _)) = do
   declare r name
@@ -133,68 +122,86 @@ resolveE r (This keyword key) = do
              _ -> resolveLocal r key keyword
 resolveE r (Unary _ right) = resolveE r right
 resolveE r (Variable name key) = do
-  whenM (liftIO $ not <$> isEmpty (resolverScopes r)) $
-    whenM (liftIO $ (== Just False) . H.lookup (tokenLexeme name) <$>
-           peek (resolverScopes r)) $
+  whenM (liftIO $ not . isEmpty <$> readIORef (resolverScopes r)) $
+    whenM (liftIO $ (== Just False) . H.lookup (tokenLexeme name) . peek <$>
+           readIORef (resolverScopes r)) $
       resolverError r name "Cannot read local variable in its own initializer."
   resolveLocal r key name
 
 resolveFunction :: Resolver -> FunDecl -> FunctionType -> MR ()
-resolveFunction r function ftype = do
-  enclosingFunction <- liftIO $ readIORef (resolverCurrentFunction r)
-  liftIO $ writeIORef (resolverCurrentFunction r) ftype
-  beginScope r
-  forM_ (functionParams function) $ \param -> do
-    declare r param
-    define r param
-  mapM_ (resolveS r) (functionBody function)
-  endScope r
-  liftIO $ writeIORef (resolverCurrentFunction r) enclosingFunction
+resolveFunction r function ftype =
+  withCurrentFunction r ftype $ withScope r Nothing $ do
+    forM_ (functionParams function) $ \param -> do
+      declare r param
+      define r param
+    mapM_ (resolveS r) (functionBody function)
 
-beginScope :: Resolver -> MR ()
-beginScope r = liftIO $ push (resolverScopes r) H.empty
+withScope :: Resolver -> Maybe (Text,Bool) -> MR () -> MR ()
+withScope r top body = do
+  beginScope r top
+  body
+  endScope r
+
+beginScope :: Resolver -> Maybe (Text,Bool) -> MR ()
+beginScope r top = liftIO $ modifyIORef (resolverScopes r) $ push $
+                   maybe H.empty (uncurry H.singleton) top
 
 endScope :: Resolver -> MR ()
-endScope r = liftIO $ void $ pop (resolverScopes r)
+endScope r = liftIO $ modifyIORef (resolverScopes r) pop
+
+withCurrentFunction :: Resolver -> FunctionType -> MR () -> MR ()
+withCurrentFunction r ftype body = do
+  enclosingFunction <- liftIO $ readIORef (resolverCurrentFunction r)
+  liftIO $ writeIORef (resolverCurrentFunction r) ftype
+  body
+  liftIO $ writeIORef (resolverCurrentFunction r) enclosingFunction
+
+withCurrentClass :: Resolver -> ClassType -> MR () -> MR ()
+withCurrentClass r ctype body = do
+  enclosingClass <- liftIO $ readIORef (resolverCurrentClass r)
+  liftIO $ writeIORef (resolverCurrentClass r) ctype
+  body
+  liftIO $ writeIORef (resolverCurrentClass r) enclosingClass
 
 declare :: Resolver -> Token -> MR ()
-declare r name = unlessM (liftIO $ isEmpty (resolverScopes r)) $ do
-  scope <- liftIO $ peek (resolverScopes r)
+declare r name = unlessM (liftIO $ isEmpty <$> readIORef (resolverScopes r)) $ do
+  scope <- liftIO $ peek <$> readIORef (resolverScopes r)
   if tokenLexeme name `H.member` scope then
     resolverError r name "Variable with this name already declared in this scope."
-  else liftIO $ do
-    pop (resolverScopes r)
-    push (resolverScopes r) $ H.insert (tokenLexeme name) False scope
+  else liftIO $ modifyIORef (resolverScopes r) . modifyTop $ H.insert (tokenLexeme name) False
 
 define :: Resolver -> Token -> MR ()
-define r name = liftIO $ unlessM (isEmpty (resolverScopes r)) $ do
-  scope <- pop (resolverScopes r)
-  push (resolverScopes r) (H.insert (tokenLexeme name) True scope)
+define r name = liftIO $ unlessM (isEmpty <$> readIORef (resolverScopes r)) $
+  modifyIORef (resolverScopes r) . modifyTop $ H.insert (tokenLexeme name) True
 
 resolveLocal :: Resolver -> ExprKey -> Token -> MR ()
 resolveLocal r key name = do
-  f <- liftIO $ findIndex (tokenLexeme name `H.member`) <$> frames (resolverScopes r)
+  f <- liftIO $ findIndex (tokenLexeme name `H.member`) . frames <$>
+                readIORef (resolverScopes r)
   mapM_ (\f' -> liftIO $ modifyIORef (resolverLocals r) ((key,f'):)) f
 
-newtype Stack a = Stack (IORef [a])
+newtype Stack a = Stack [a]
 
-emptyStack :: IO (Stack a)
-emptyStack = Stack <$> newIORef []
+emptyStack :: Stack a
+emptyStack = Stack []
 
-push :: Stack a -> a -> IO ()
-push (Stack r) value = modifyIORef r (value :)
+push :: a -> Stack a -> Stack a
+push value (Stack r) = Stack (value : r)
 
-peek :: Stack a -> IO a
-peek (Stack r) = Data.List.head <$> readIORef r
+peek :: Stack a -> a
+peek (Stack (h:_)) = h
+peek _ = error "Internal error: peek on empty Stack"
 
-pop :: Stack a -> IO a
-pop (Stack r) = do
-  top <- Data.List.head <$> readIORef r
-  modifyIORef r Data.List.tail
-  return top
+pop :: Stack a -> Stack a
+pop (Stack (_:t)) = Stack t
+pop _ = error "Internal error: pop on empty Stack"
 
-isEmpty :: Stack a -> IO Bool
-isEmpty (Stack r) = null <$> readIORef r
+isEmpty :: Stack a -> Bool
+isEmpty (Stack r) = null r
 
-frames :: Stack a -> IO [a]
-frames (Stack r) = readIORef r
+frames :: Stack a -> [a]
+frames (Stack r) = r
+
+modifyTop :: (a -> a) -> Stack a -> Stack a
+modifyTop f (Stack (h:t)) = Stack (f h : t)
+modifyTop _ _ = error "Internal error: modifyTop on empty Stack"

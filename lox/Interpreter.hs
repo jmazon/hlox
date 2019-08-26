@@ -172,7 +172,7 @@ executeBlock :: Interpreter -> [Stmt] -> Environment -> IO ()
 executeBlock i statements environment =
   forM_ statements $ execute i { interpreterEnvironment = environment }
 
-resolveLocals :: Interpreter -> [(ExprKey,Int)] -> IO ()
+resolveLocals :: Foldable f => Interpreter -> f (ExprKey,Int) -> IO ()
 resolveLocals i kvs = modifyIORef (interpreterLocals i) $
                       \h0 -> foldl' (\h (k,v) -> H.insert k v h) h0 kvs
 

@@ -3,12 +3,10 @@ module Resolver (resolve) where
 
 import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
-import Data.IORef
 import Data.List
-import Data.Maybe
 import Control.Monad
 import Data.Text (Text)
-import Control.Monad.Writer
+import Control.Monad.RWS.Strict
 import Data.DList
 
 import Util
@@ -21,164 +19,135 @@ data ClassType = CT_None | CT_Class | CT_Subclass
 {-# ANN type FunctionType ("HLint: ignore Use camelCase" :: String) #-}
 {-# ANN type ClassType ("HLint: ignore Use camelCase" :: String) #-}
 
-data Resolver = Resolver
-                { resolverLocals :: IORef [(ExprKey,Int)]
-                , resolverScopes :: IORef (Stack (HashMap Text Bool))
-                , resolverCurrentFunction :: IORef FunctionType
-                , resolverCurrentClass :: IORef ClassType }
+data ResolverCurrents = ResolverCurrents { currentFunction :: FunctionType
+                                         , currentClass :: ClassType }
+type MR = RWS ResolverCurrents (DList (ExprKey,Int),DList (Token,Text))
+                               (Stack (HashMap Text Bool))
 
-type ResolverError = (Token,Text)
-type MR = WriterT (DList ResolverError) IO
+resolve :: [Stmt] -> (DList (ExprKey,Int),DList (Token,Text))
+resolve statements = snd $ execRWS (mapM_ resolveS statements)
+                             (ResolverCurrents FT_None CT_None) emptyStack
 
-resolve :: [Stmt] -> IO ([(ExprKey,Int)],DList ResolverError)
-resolve statements = runWriterT $ do
-  r <- liftIO newResolver
-  mapM_ (resolveS r) statements
-  liftIO $ readIORef (resolverLocals r)
+resolverError :: Token -> Text -> MR ()
+resolverError tok msg = tell (empty,singleton (tok,msg))
 
-newResolver :: IO Resolver
-newResolver = liftM4 Resolver (newIORef []) (newIORef emptyStack)
-                       (newIORef FT_None) (newIORef CT_None)
-
-resolverError :: Resolver -> Token -> Text -> MR ()
-resolverError _ tok msg = tell $ singleton (tok,msg)
-
-resolveS :: Resolver -> Stmt -> MR ()
-resolveS r (Block statements) = withScope r Nothing $ mapM_ (resolveS r) statements
-resolveS r (Class name superclass methods) = do
+resolveS :: Stmt -> MR ()
+resolveS (Block statements) = withScope Nothing $ mapM_ resolveS statements
+resolveS (Class name superclass methods) = do
   -- as opposed to jlox, those two performed before currentClass is CT_Class:
-  declare r name
-  define r name
+  declare name
+  define name
   scope <- case superclass of
-    Nothing -> return $ withCurrentClass r CT_Class
+    Nothing -> return $ withCurrentClass CT_Class
     Just sc -> do
       when (tokenLexeme name == tokenLexeme (variableName sc)) $
-        resolverError r (variableName sc) "A class cannot inherit from itself."
+        resolverError (variableName sc) "A class cannot inherit from itself."
       -- as opposed to jlox, this performed before currentClass is CT_Subclass:
-      resolveE r sc
-      return $ withCurrentClass r CT_Subclass . withScope r (Just ("super",True))
-  scope $ withScope r (Just ("this",True)) $
+      resolveE sc
+      return $ withCurrentClass CT_Subclass . withScope (Just ("super",True))
+  scope $ withScope (Just ("this",True)) $
     forM_ methods $ \method -> do
       let declaration | tokenLexeme (functionName method) == "init" = FT_Initializer
                       | otherwise = FT_Method
-      resolveFunction r method declaration
-resolveS r (Expression expression) = resolveE r expression
-resolveS r (Function f@(FunDecl name _ _)) = do
-  declare r name
-  define r name
-  resolveFunction r f FT_Function
-resolveS r (If condition thenBranch elseBranch) = do
-  resolveE r condition
-  resolveS r thenBranch
-  maybe (return ()) (resolveS r) elseBranch
-resolveS r (Print expression) = resolveE r expression
-resolveS r (Return keyword value) = do
-  cf <- liftIO $ readIORef (resolverCurrentFunction r)
+      resolveFunction method declaration
+resolveS (Expression expression) = resolveE expression
+resolveS (Function f@(FunDecl name _ _)) = do
+  declare name
+  define name
+  resolveFunction f FT_Function
+resolveS (If condition thenBranch elseBranch) = do
+  resolveE condition
+  resolveS thenBranch
+  mapM_ resolveS elseBranch
+resolveS (Print expression) = resolveE expression
+resolveS (Return keyword value) = do
+  cf <- asks currentFunction
   case cf of
-    FT_None -> resolverError r keyword "Cannot return from top-level code."
+    FT_None -> resolverError keyword "Cannot return from top-level code."
+    FT_Initializer -> sequence_ $ resolverError keyword "Cannot return a value from an initializer." <$ value
     _ -> return ()
-  when (isJust value) $ do
-    case cf of FT_Initializer -> resolverError r keyword "Cannot return a value from an initializer."
-               _ -> return ()
-    resolveE r (fromJust value)
-resolveS r (Var name initializer) = do
-  declare r name
-  maybe (return ()) (resolveE r) initializer
-  define r name
-resolveS r (While condition body) = do
-  resolveE r condition
-  resolveS r body
+  mapM_ resolveE value
+resolveS (Var name initializer) = do
+  declare name
+  maybe (return ()) resolveE  initializer
+  define name
+resolveS (While condition body) = do
+  resolveE condition
+  resolveS body
 
-resolveE :: Resolver -> Expr -> MR ()
-resolveE r (Assign name key value) = do
-  resolveE r value
-  resolveLocal r key name
-resolveE r (Binary left _ right) = do
-  resolveE r left
-  resolveE r right
-resolveE r (Call callee _ arguments) = do
-  resolveE r callee
-  mapM_ (resolveE r) arguments
-resolveE r (Get object _) = resolveE r object
-resolveE r (Grouping expression) = resolveE r expression
-resolveE _ (Literal _) = return ()
-resolveE r (Logical left _ right) = do
-  resolveE r left
-  resolveE r right
-resolveE r (Set object _ value) = do
-  resolveE r value
-  resolveE r object
-resolveE r (Super keyword key _) = do
-  cc <- liftIO $ readIORef (resolverCurrentClass r)
+resolveE :: Expr -> MR ()
+resolveE (Assign name key value) = do
+  resolveE value
+  resolveLocal key name
+resolveE (Binary left _ right) = do
+  resolveE left
+  resolveE right
+resolveE (Call callee _ arguments) = do
+  resolveE callee
+  mapM_ resolveE arguments
+resolveE (Get object _) = resolveE object
+resolveE (Grouping expression) = resolveE expression
+resolveE (Literal _) = return ()
+resolveE (Logical left _ right) = do
+  resolveE left
+  resolveE right
+resolveE (Set object _ value) = do
+  resolveE value
+  resolveE object
+resolveE (Super keyword key _) = do
+  cc <- asks currentClass
   case cc of
-    CT_None -> resolverError r keyword "Cannot use 'super' outside of a class."
-    _ -> case cc of
-      CT_Subclass -> return ()
-      _ -> resolverError r keyword "Cannot use 'super' in a class with no superclass."
-  resolveLocal r key keyword
-resolveE r (This keyword key) = do
-  cc <- liftIO $ readIORef (resolverCurrentClass r)
-  case cc of CT_None -> resolverError r keyword "Cannot use 'this' outside of a class."
-             _ -> resolveLocal r key keyword
-resolveE r (Unary _ right) = resolveE r right
-resolveE r (Variable name key) = do
-  whenM (liftIO $ not . isEmpty <$> readIORef (resolverScopes r)) $
-    whenM (liftIO $ (== Just False) . H.lookup (tokenLexeme name) . peek <$>
-           readIORef (resolverScopes r)) $
-      resolverError r name "Cannot read local variable in its own initializer."
-  resolveLocal r key name
+    CT_None -> resolverError keyword "Cannot use 'super' outside of a class."
+    -- simplified from jlox
+    CT_Class -> resolverError keyword "Cannot use 'super' in a class with no superclass."
+    CT_Subclass -> return ()
+  resolveLocal key keyword
+resolveE (This keyword key) = do
+  cc <- asks currentClass
+  case cc of CT_None -> resolverError keyword "Cannot use 'this' outside of a class."
+             _ -> resolveLocal key keyword
+resolveE (Unary _ right) = resolveE right
+resolveE (Variable name key) = do
+  whenM (not . isEmpty <$> get) $
+    whenM ((== Just False) . H.lookup (tokenLexeme name) . peek <$> get) $
+      resolverError name "Cannot read local variable in its own initializer."
+  resolveLocal key name
 
-resolveFunction :: Resolver -> FunDecl -> FunctionType -> MR ()
-resolveFunction r function ftype =
-  withCurrentFunction r ftype $ withScope r Nothing $ do
+resolveFunction :: FunDecl -> FunctionType -> MR ()
+resolveFunction function ftype =
+  withCurrentFunction ftype $ withScope Nothing $ do
     forM_ (functionParams function) $ \param -> do
-      declare r param
-      define r param
-    mapM_ (resolveS r) (functionBody function)
+      declare param
+      define param
+    mapM_ resolveS (functionBody function)
 
-withScope :: Resolver -> Maybe (Text,Bool) -> MR () -> MR ()
-withScope r top body = do
-  beginScope r top
+withScope :: Maybe (Text,Bool) -> MR () -> MR ()
+withScope top body = do
+  modify $ push $ maybe H.empty (uncurry H.singleton) top
   body
-  endScope r
+  modify pop
 
-beginScope :: Resolver -> Maybe (Text,Bool) -> MR ()
-beginScope r top = liftIO $ modifyIORef (resolverScopes r) $ push $
-                   maybe H.empty (uncurry H.singleton) top
+withCurrentFunction :: FunctionType -> MR () -> MR ()
+withCurrentFunction ftype = local (\cs -> cs { currentFunction = ftype })
 
-endScope :: Resolver -> MR ()
-endScope r = liftIO $ modifyIORef (resolverScopes r) pop
+withCurrentClass :: ClassType -> MR () -> MR ()
+withCurrentClass ctype = local (\cs -> cs { currentClass = ctype })
 
-withCurrentFunction :: Resolver -> FunctionType -> MR () -> MR ()
-withCurrentFunction r ftype body = do
-  enclosingFunction <- liftIO $ readIORef (resolverCurrentFunction r)
-  liftIO $ writeIORef (resolverCurrentFunction r) ftype
-  body
-  liftIO $ writeIORef (resolverCurrentFunction r) enclosingFunction
-
-withCurrentClass :: Resolver -> ClassType -> MR () -> MR ()
-withCurrentClass r ctype body = do
-  enclosingClass <- liftIO $ readIORef (resolverCurrentClass r)
-  liftIO $ writeIORef (resolverCurrentClass r) ctype
-  body
-  liftIO $ writeIORef (resolverCurrentClass r) enclosingClass
-
-declare :: Resolver -> Token -> MR ()
-declare r name = unlessM (liftIO $ isEmpty <$> readIORef (resolverScopes r)) $ do
-  scope <- liftIO $ peek <$> readIORef (resolverScopes r)
+declare :: Token -> MR ()
+declare name = unlessM (isEmpty <$> get) $ do
+  scope <- peek <$> get
   if tokenLexeme name `H.member` scope then
-    resolverError r name "Variable with this name already declared in this scope."
-  else liftIO $ modifyIORef (resolverScopes r) . modifyTop $ H.insert (tokenLexeme name) False
+    resolverError name "Variable with this name already declared in this scope."
+  else modify . modifyTop $ H.insert (tokenLexeme name) False
 
-define :: Resolver -> Token -> MR ()
-define r name = liftIO $ unlessM (isEmpty <$> readIORef (resolverScopes r)) $
-  modifyIORef (resolverScopes r) . modifyTop $ H.insert (tokenLexeme name) True
+define :: Token -> MR ()
+define name = unlessM (isEmpty <$> get) $
+  modify . modifyTop $ H.insert (tokenLexeme name) True
 
-resolveLocal :: Resolver -> ExprKey -> Token -> MR ()
-resolveLocal r key name = do
-  f <- liftIO $ findIndex (tokenLexeme name `H.member`) . frames <$>
-                readIORef (resolverScopes r)
-  mapM_ (\f' -> liftIO $ modifyIORef (resolverLocals r) ((key,f'):)) f
+resolveLocal :: ExprKey -> Token -> MR ()
+resolveLocal key name = do
+  f <- findIndex (tokenLexeme name `H.member`) . frames <$> get
+  mapM_ (\f' -> tell (singleton (key,f'),empty)) f
 
 newtype Stack a = Stack [a]
 

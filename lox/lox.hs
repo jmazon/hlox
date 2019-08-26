@@ -51,7 +51,7 @@ run interpreter source = do
   let (statements,parseErrors) = parse tokens
   mapM_ (uncurry tokenError) parseErrors
   if not (null scanErrors && null parseErrors) then return HadError else do
-    (locals,resolveErrors) <- resolve statements
+    let (locals,resolveErrors) = resolve statements
     mapM_ (uncurry tokenError) resolveErrors
     resolveLocals interpreter locals
     if not (null resolveErrors) then return HadError else do

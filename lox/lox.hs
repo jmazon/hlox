@@ -6,6 +6,7 @@ import System.IO
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import Control.Arrow
 
 import Scanner (scanTokens)
 import Parser (parse)
@@ -29,12 +30,11 @@ main = do
 runFile :: Interpreter -> FilePath -> IO ()
 runFile interpreter path = do
   bytes <- T.readFile path
-  result <- run interpreter bytes
+  (_,result) <- run interpreter bytes
 
-  case result of
-    NoError -> return ()
-    HadError -> exitWith (ExitFailure 65)
-    HadRuntimeError -> exitWith (ExitFailure 70)
+  case result of NoError         -> exitSuccess
+                 HadError        -> exitWith (ExitFailure 65)
+                 HadRuntimeError -> exitWith (ExitFailure 70)
 
 runPrompt :: Interpreter -> IO ()
 runPrompt interpreter = forever $ do
@@ -44,21 +44,23 @@ runPrompt interpreter = forever $ do
 
 data RunResult = NoError | HadError | HadRuntimeError
 
-run :: Interpreter -> Text -> IO RunResult
+run :: Interpreter -> Text -> IO (Interpreter,RunResult)
 run interpreter source = do
   let (tokens,scanErrors) = scanTokens source
   mapM_ (uncurry scanError) scanErrors
   let (statements,parseErrors) = parse tokens
   mapM_ (uncurry tokenError) parseErrors
-  if not (null scanErrors && null parseErrors) then return HadError else do
-    let (locals,resolveErrors) = resolve statements
-    mapM_ (uncurry tokenError) resolveErrors
-    resolveLocals interpreter locals
-    if not (null resolveErrors) then return HadError else do
-      result <- interpret interpreter statements
-      case result of
-        Left rte -> runtimeError rte
-        _ -> return NoError
+  if not (null scanErrors && null parseErrors)
+    then return (interpreter,HadError)
+    else do
+      let (locals,resolveErrors) = resolve statements
+      mapM_ (uncurry tokenError) resolveErrors
+      i' <- resolveLocals interpreter locals
+      if not (null resolveErrors) then return (i',HadError) else do
+        result <- interpret i' statements
+        -- over the top:
+        runKleisli (second $ Kleisli $ maybe (return NoError) runtimeError)
+                   result
 
 scanError :: Int -> Text -> IO RunResult
 scanError line message = report line "" message

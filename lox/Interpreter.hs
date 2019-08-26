@@ -45,9 +45,10 @@ globals = unsafePerformIO $ do
 newInterpreter :: IO Interpreter
 newInterpreter = Interpreter globals <$> newIORef H.empty
 
-interpret :: Interpreter -> [Stmt] -> IO (Either RuntimeError ())
-interpret i statements =
-  try (mapM_ (execute i) statements)
+interpret :: Interpreter -> [Stmt] -> IO (Interpreter,Maybe RuntimeError)
+interpret i statements = do
+  rte <- (mapM_ (execute i) statements >> return Nothing) `catch` (return . Just)
+  return (i,rte)
 
 evaluate :: Interpreter -> Expr -> IO Dynamic
 evaluate _ (Literal LNull) = return (toDyn ())
@@ -172,9 +173,11 @@ executeBlock :: Interpreter -> [Stmt] -> Environment -> IO ()
 executeBlock i statements environment =
   forM_ statements $ execute i { interpreterEnvironment = environment }
 
-resolveLocals :: Foldable f => Interpreter -> f (ExprKey,Int) -> IO ()
-resolveLocals i kvs = modifyIORef (interpreterLocals i) $
-                      \h0 -> foldl' (\h (k,v) -> H.insert k v h) h0 kvs
+resolveLocals :: Foldable f => Interpreter -> f (ExprKey,Int) -> IO Interpreter
+resolveLocals i kvs = do
+  modifyIORef (interpreterLocals i) $
+    \h0 -> foldl' (\h (k,v) -> H.insert k v h) h0 kvs
+  return i
 
 lookupVariable :: Interpreter -> Token -> ExprKey -> IO Dynamic
 lookupVariable i name key = do

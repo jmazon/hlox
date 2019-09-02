@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-import Control.Monad
 import System.Environment
 import System.Exit
 import System.IO
@@ -18,14 +17,13 @@ import RuntimeError (RuntimeError(RuntimeError))
 
 main :: IO ()
 main = do
-  interpreter <- newInterpreter
   args <- getArgs
   if length args > 1
     then do putStrLn "Usage: hlox [script]"
             exitWith $ ExitFailure 64
     else if length args == 1
-         then runFile interpreter (head args)
-         else runPrompt interpreter
+         then runFile newInterpreter (head args)
+         else runPrompt newInterpreter
 
 runFile :: Interpreter -> FilePath -> IO ()
 runFile interpreter path = do
@@ -37,10 +35,10 @@ runFile interpreter path = do
                  HadRuntimeError -> exitWith (ExitFailure 70)
 
 runPrompt :: Interpreter -> IO ()
-runPrompt interpreter = forever $ do
+runPrompt interpreter = do
   putStr "> "
   hFlush stdout
-  void $ run interpreter =<< T.getLine
+  runPrompt . fst =<< run interpreter =<< T.getLine
 
 data RunResult = NoError | HadError | HadRuntimeError
 
@@ -55,7 +53,7 @@ run interpreter source = do
     else do
       let (locals,resolveErrors) = resolve statements
       mapM_ (uncurry tokenError) resolveErrors
-      i' <- resolveLocals interpreter locals
+      let i' = resolveLocals interpreter locals
       if not (null resolveErrors) then return (i',HadError) else do
         result <- interpret i' statements
         -- over the top:

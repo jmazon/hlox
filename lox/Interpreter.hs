@@ -6,7 +6,6 @@ module Interpreter (Interpreter(Interpreter),newInterpreter,interpret,executeBlo
 import Data.List (foldl')
 import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
-import Data.IORef
 import Control.Monad
 import Control.Exception hiding (evaluate)
 import System.IO.Unsafe
@@ -33,7 +32,7 @@ import Return (Return(Return))
 import LoxCallable (LoxCallable,arity,call,toString,callableId)
 
 data Interpreter = Interpreter { interpreterEnvironment :: Environment
-                               , interpreterLocals :: IORef (HashMap ExprKey Int)}
+                               , interpreterLocals :: HashMap ExprKey Int}
 
 globals :: Environment
 {-# NOINLINE globals #-}
@@ -42,8 +41,8 @@ globals = unsafePerformIO $ do
   define g "clock" . toDyn . Native 0 nativeClock =<< newUnique
   return g
 
-newInterpreter :: IO Interpreter
-newInterpreter = Interpreter globals <$> newIORef H.empty
+newInterpreter :: Interpreter
+newInterpreter = Interpreter globals H.empty
 
 interpret :: Interpreter -> [Stmt] -> IO (Interpreter,Maybe RuntimeError)
 interpret i statements = do
@@ -73,7 +72,7 @@ evaluate i (Set object name value) = do
                           return v
                         Nothing -> throwIO (RuntimeError name "Only instances have fields.")
 evaluate i (Super _ key method) = do
-  Just distance <- H.lookup key <$> readIORef (interpreterLocals i)
+  let Just distance = H.lookup key (interpreterLocals i)
   Just superclass <- fromDynamic <$> getAt (interpreterEnvironment i) distance "super"
   -- "this" is always one level nearer than "super"'s environment
   Just object <- fromDynamic <$> getAt (interpreterEnvironment i) (distance - 1) "this"
@@ -91,7 +90,7 @@ evaluate i (Unary operator right) = do
 evaluate i (Variable name key) = lookupVariable i name key
 evaluate i (Assign name key value) = do
   v <- evaluate i value
-  distance <- H.lookup key <$> readIORef (interpreterLocals i)
+  let distance = H.lookup key (interpreterLocals i)
   case distance of Just d -> assignAt (interpreterEnvironment i) d name v
                    Nothing -> assign globals name v
   return v
@@ -173,15 +172,15 @@ executeBlock :: Interpreter -> [Stmt] -> Environment -> IO ()
 executeBlock i statements environment =
   forM_ statements $ execute i { interpreterEnvironment = environment }
 
-resolveLocals :: Foldable f => Interpreter -> f (ExprKey,Int) -> IO Interpreter
-resolveLocals i kvs = do
-  modifyIORef (interpreterLocals i) $
-    \h0 -> foldl' (\h (k,v) -> H.insert k v h) h0 kvs
-  return i
+resolveLocals :: Foldable f => Interpreter -> f (ExprKey,Int) -> Interpreter
+resolveLocals i kvs =
+  i { interpreterLocals = foldl' (\h (k,v) -> H.insert k v h)
+                                 (interpreterLocals i) kvs }
+
 
 lookupVariable :: Interpreter -> Token -> ExprKey -> IO Dynamic
 lookupVariable i name key = do
-  distance <- H.lookup key <$> readIORef (interpreterLocals i)
+  let distance = H.lookup key (interpreterLocals i)
   case distance of
     Just d -> getAt (interpreterEnvironment i) d (tokenLexeme name)
     Nothing -> get globals name

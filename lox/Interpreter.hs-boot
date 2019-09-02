@@ -1,8 +1,13 @@
-module Interpreter (Interpreter,executeBlock) where
+module Interpreter (Interpreter,executeBlock,MI) where
+
+import Control.Monad.Reader
+import Control.Monad.Except
 
 import Stmt
 import Environment (Environment)
+import Return
 
 data Interpreter
+type MI = ExceptT Return (ReaderT Interpreter IO)
 
-executeBlock :: Interpreter -> [Stmt] -> Environment -> IO ()
+executeBlock :: [Stmt] -> Environment -> MI ()

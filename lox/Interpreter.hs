@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Interpreter (Interpreter(Interpreter),newInterpreter,interpret,executeBlock,resolveLocals) where
+module Interpreter (Interpreter(Interpreter),newInterpreter,interpret,executeBlock,resolveLocals,MI) where
 
 import Data.List (foldl')
 import qualified Data.HashMap.Strict as H
@@ -16,6 +16,8 @@ import Control.Applicative
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import Control.Monad.Reader
+import Control.Monad.Except
 
 import Util
 import qualified TokenType as TT
@@ -30,79 +32,82 @@ import LoxFunction (LoxFunction,newFunction,bind)
 import Return (Return(Return))
 import LoxCallable (LoxCallable,arity,call,toString,callableId)
 
+type MI = ExceptT Return (ReaderT Interpreter IO)
+
 data Interpreter = Interpreter { globals :: Environment
-                               , interpreterEnvironment :: Environment
-                               , interpreterLocals :: HashMap ExprKey Int}
+                               , environment :: Environment
+                               , locals :: HashMap ExprKey Int}
 
 newInterpreter :: IO Interpreter
 newInterpreter = do
   g <- do
     g <- newEnvironment
-    define g "clock" . toDyn . Native 0 nativeClock =<< newUnique
+    clock <- toDyn . Native 0 nativeClock <$> newUnique
+    define "clock" clock g
     return g
   return $ Interpreter g g H.empty
 
 interpret :: Interpreter -> [Stmt] -> IO (Interpreter,Maybe RuntimeError)
 interpret i statements = do
-  rte <- (mapM_ (execute i) statements >> return Nothing) `catch` (return . Just)
+  rte <- (runReaderT (runExceptT (mapM_ execute statements)) i >> return Nothing) `catch` (return . Just)
   return (i,rte)
 
-evaluate :: Interpreter -> Expr -> IO Dynamic
-evaluate _ (Literal LNull) = return (toDyn ())
-evaluate _ (Literal (LNumber n)) = return (toDyn n)
-evaluate _ (Literal (LBool b)) = return (toDyn b)
-evaluate _ (Literal (LString s)) = return (toDyn s)
-evaluate i (Logical left operator right) = do
-  l <- evaluate i left
+evaluate :: Expr -> MI Dynamic
+evaluate (Literal LNull) = return (toDyn ())
+evaluate (Literal (LNumber n)) = return (toDyn n)
+evaluate (Literal (LBool b)) = return (toDyn b)
+evaluate (Literal (LString s)) = return (toDyn s)
+evaluate (Logical left operator right) = do
+  l <- evaluate left
   case (tokenType operator,isTruthy l) of
     (TT.Or,True) -> return l
     (TT.And,False) -> return l
-    _ -> evaluate i right
-evaluate i (Get object name) = do
-  o <- evaluate i object
-  case fromDynamic o of Just inst -> getP inst name
-                        Nothing -> throwIO (RuntimeError name "Only instances have properties.")
-evaluate i (Set object name value) = do
-  o <- evaluate i object
+    _ -> evaluate right
+evaluate (Get object name) = do
+  o <- evaluate object
+  case fromDynamic o of Just inst -> liftIO $ getP inst name
+                        Nothing -> throwIO' (RuntimeError name "Only instances have properties.")
+evaluate (Set object name value) = do
+  o <- evaluate object
   case fromDynamic o of Just inst -> do
-                          v <- evaluate i value
-                          setP inst name v
+                          v <- evaluate value
+                          liftIO $ setP inst name v
                           return v
-                        Nothing -> throwIO (RuntimeError name "Only instances have fields.")
-evaluate i (Super _ key method) = do
-  let Just distance = H.lookup key (interpreterLocals i)
-  Just superclass <- fromDynamic <$> getAt (interpreterEnvironment i) distance "super"
+                        Nothing -> throwIO' (RuntimeError name "Only instances have fields.")
+evaluate (Super _ key method) = do
+  Just distance <- H.lookup key <$> asks locals
+  Just superclass <- fmap fromDynamic . liftIO . getAt distance "super" =<< asks environment
   -- "this" is always one level nearer than "super"'s environment
-  Just object <- fromDynamic <$> getAt (interpreterEnvironment i) (distance - 1) "this"
+  Just object <- fmap fromDynamic . liftIO . getAt (distance - 1) "this" =<< asks environment
   case findMethod superclass (tokenLexeme method) of
-    Just m -> toDyn <$> bind m object
-    Nothing -> throwIO (RuntimeError method (T.concat ["Undefined property '",tokenLexeme method,"'."]))
-evaluate i (This keyword key) = lookupVariable i keyword key
-evaluate i (Grouping expr) = evaluate i expr
-evaluate i (Unary operator right) = do
-  r <- evaluate i right
+    Just m -> liftIO $ toDyn <$> bind m object
+    Nothing -> throwIO' (RuntimeError method (T.concat ["Undefined property '",tokenLexeme method,"'."]))
+evaluate (This keyword key) = lookupVariable keyword key
+evaluate (Grouping expr) = evaluate expr
+evaluate (Unary operator right) = do
+  r <- evaluate right
   case tokenType operator of
     TT.Bang -> return (toDyn (not (isTruthy r)))
-    TT.Minus -> toDyn . negate <$> getNumberOperand operator r
+    TT.Minus -> liftIO $ toDyn . negate <$> getNumberOperand operator r
     _ -> return (toDyn ()) -- XXX why?
-evaluate i (Variable name key) = lookupVariable i name key
-evaluate i (Assign name key value) = do
-  v <- evaluate i value
-  let distance = H.lookup key (interpreterLocals i)
-  case distance of Just d -> assignAt (interpreterEnvironment i) d name v
-                   Nothing -> assign (globals i) name v
+evaluate (Variable name key) = lookupVariable name key
+evaluate (Assign name key value) = do
+  v <- evaluate value
+  distance <- H.lookup key <$> asks locals
+  case distance of Just d -> liftIO . assignAt d name v =<< asks environment
+                   Nothing -> liftIO . assign name v =<< asks globals
   return v
-evaluate i (Binary left operator right) = do
-  l <- evaluate i left
-  r <- evaluate i right
-  case tokenType operator of
-    TT.Greater -> toDyn . uncurry (>) <$> getNumberOperands operator l r
+evaluate (Binary left operator right) = do
+  l <- evaluate left
+  r <- evaluate right
+  liftIO $ case tokenType operator of
+    TT.Greater      -> toDyn . uncurry (>)  <$> getNumberOperands operator l r
     TT.GreaterEqual -> toDyn . uncurry (>=) <$> getNumberOperands operator l r
-    TT.Less -> toDyn .uncurry (<) <$> getNumberOperands operator l r
-    TT.LessEqual -> toDyn . uncurry (<=) <$> getNumberOperands operator l r
+    TT.Less         -> toDyn . uncurry (<)  <$> getNumberOperands operator l r
+    TT.LessEqual    -> toDyn . uncurry (<=) <$> getNumberOperands operator l r
 
-    TT.BangEqual -> return (toDyn (not (isEqual l r)))
-    TT.EqualEqual -> return (toDyn (isEqual l r))
+    TT.BangEqual    -> return (toDyn (not (isEqual l r)))
+    TT.EqualEqual   -> return (toDyn (isEqual l r))
 
     TT.Plus | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl + vr :: Double))
             | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl `T.append` vr))
@@ -111,77 +116,76 @@ evaluate i (Binary left operator right) = do
     TT.Slash -> toDyn . uncurry (/) <$> getNumberOperands operator l r
     TT.Star -> toDyn . uncurry (*) <$> getNumberOperands operator l r
     _ -> return (toDyn ()) -- XXX why?
-evaluate i (Call callee paren arguments) = do
-  c <- evaluate i callee
-  as <- mapM (evaluate i) arguments
+evaluate (Call callee paren arguments) = do
+  c <- evaluate callee
+  as <- mapM evaluate arguments
   case dynToCallable c of
-    Nothing -> throwIO $ RuntimeError paren "Can only call functions and classes."
+    Nothing -> throwIO' $ RuntimeError paren "Can only call functions and classes."
     Just (IsCallable function) -> do
       when (length arguments /= arity function) $
-        throwIO $ RuntimeError paren $ T.concat [ "Expected "
+        throwIO' $ RuntimeError paren $ T.concat [ "Expected "
                                                 , T.pack (show (arity function))
                                                 , " arguments but got "
                                                 , T.pack (show (length arguments))
                                                 , "." ]
-      call function i as
+      call function as
 
-execute :: Interpreter -> Stmt -> IO ()
-execute i (Class name superclass methods) = do
+execute :: Stmt -> MI ()
+execute (Class name superclass methods) = do
   sc <- sequence $ flip fmap superclass $ \scVar -> do
-    scVal <- evaluate i scVar
+    scVal <- evaluate scVar
     case fromDynamic scVal of
       Just scClass -> return scClass
-      Nothing -> throwIO (RuntimeError (variableName scVar) "Superclass must be a class.")
-  define (interpreterEnvironment i) (tokenLexeme name) (toDyn ())
-  environment <- case sc of
+      Nothing -> throwIO' (RuntimeError (variableName scVar) "Superclass must be a class.")
+  liftIO . define (tokenLexeme name) (toDyn ()) =<< asks environment
+  env <- case sc of
     Just sc' -> do
-      environment <- childEnvironment (interpreterEnvironment i)
-      define environment "super" (toDyn sc')
-      return environment
-    Nothing -> return (interpreterEnvironment i)
-  methods' <- fmap H.fromList $ forM methods $ \method -> do
-    function <- newFunction method environment (tokenLexeme (functionName method) == "init")
+      env <- liftIO . childEnvironment =<< asks environment
+      liftIO $ define "super" (toDyn sc') env
+      return env
+    Nothing -> asks environment
+  methods' <- liftIO $ fmap H.fromList $ forM methods $ \method -> do
+    function <- newFunction method env (tokenLexeme (functionName method) == "init")
     return (tokenLexeme (functionName method),function)
-  klass <- newClass (tokenLexeme name) sc methods'
-  assign (interpreterEnvironment i) name (toDyn klass)
-execute i (Expression expr) = void $ evaluate i expr
-execute i (Function f@(FunDecl name _ _)) =
-  define (interpreterEnvironment i) (tokenLexeme name) .
-    toDyn =<< newFunction f (interpreterEnvironment i) False
-execute i (If condition thenBranch elseBranch) = do
-  c <- isTruthy <$> evaluate i condition
-  if c then execute i thenBranch
-    else maybe (pure ()) (execute i) elseBranch
-execute i (Print value) = do
-  v <- evaluate i value
-  T.putStrLn (stringify v)
-execute i (Stmt.Return _ value) = do
-  v <- maybe (return (toDyn ())) (evaluate i) value
-  throwIO (Return.Return v)
-execute i (Var name initializer) = do
-  value <- maybe (return (toDyn ())) (evaluate i) initializer
-  define (interpreterEnvironment i) (tokenLexeme name) value
-execute i (While condition body) =
-  whileM_ (isTruthy <$> evaluate i condition) $ execute i body
-execute i (Block statements) = executeBlock i statements =<<
-                                 childEnvironment (interpreterEnvironment i)
+  klass <- liftIO $ newClass (tokenLexeme name) sc methods'
+  liftIO . assign name (toDyn klass) =<< asks environment
+execute (Expression expr) = void $ evaluate expr
+execute (Function f@(FunDecl name _ _)) = do
+  e <- asks environment
+  fun <- liftIO $ toDyn <$> newFunction f e False
+  liftIO $ define (tokenLexeme name) fun e
+execute (If condition thenBranch elseBranch) = do
+  c <- isTruthy <$> evaluate condition
+  if c then execute thenBranch
+    else maybe (pure ()) execute elseBranch
+execute (Print value) = do
+  v <- evaluate value
+  liftIO $ T.putStrLn (stringify v)
+execute (Stmt.Return _ value) = do
+  v <- maybe (return (toDyn ())) evaluate value
+  throwError (Return.Return v)
+execute (Var name initializer) = do
+  value <- maybe (return (toDyn ())) evaluate initializer
+  liftIO . define (tokenLexeme name) value =<< asks environment
+execute (While condition body) =
+  whileM_ (isTruthy <$> evaluate condition) $ execute body
+execute (Block statements) = executeBlock statements =<<
+                             liftIO . childEnvironment =<< asks environment
 
-executeBlock :: Interpreter -> [Stmt] -> Environment -> IO ()
-executeBlock i statements environment =
-  forM_ statements $ execute i { interpreterEnvironment = environment }
+executeBlock :: [Stmt] -> Environment -> MI ()
+executeBlock statements env =
+  local (\i -> i { environment = env }) $ mapM_ execute statements
 
 resolveLocals :: Foldable f => Interpreter -> f (ExprKey,Int) -> Interpreter
 resolveLocals i kvs =
-  i { interpreterLocals = foldl' (\h (k,v) -> H.insert k v h)
-                                 (interpreterLocals i) kvs }
+  i { locals = foldl' (\h (k,v) -> H.insert k v h) (locals i) kvs }
 
-
-lookupVariable :: Interpreter -> Token -> ExprKey -> IO Dynamic
-lookupVariable i name key = do
-  let distance = H.lookup key (interpreterLocals i)
+lookupVariable :: Token -> ExprKey -> MI Dynamic
+lookupVariable name key = do
+  distance <- H.lookup key <$> asks locals
   case distance of
-    Just d -> getAt (interpreterEnvironment i) d (tokenLexeme name)
-    Nothing -> get (globals i) name
+    Just d -> liftIO . getAt d (tokenLexeme name) =<< asks environment
+    Nothing -> liftIO . get name =<< asks globals
 
 getNumberOperand :: Token -> Dynamic -> IO Double
 getNumberOperand operator operand
@@ -224,7 +228,7 @@ data Native = Native { nativeArity :: Int
                      , nativeId :: Unique }
 instance LoxCallable Native where
   arity = nativeArity
-  call n _ = nativeFn n
+  call n = liftIO . nativeFn n
   toString _ = "<native fn>"
   callableId = nativeId
 
@@ -240,3 +244,6 @@ dynToCallable :: Dynamic -> Maybe IsCallable
 dynToCallable d = IsCallable <$> (fromDynamic d :: Maybe LoxFunction) <|>
                   IsCallable <$> (fromDynamic d :: Maybe Native) <|>
                   IsCallable <$> (fromDynamic d :: Maybe LoxClass)
+
+throwIO' :: RuntimeError -> MI a
+throwIO' = liftIO . throwIO

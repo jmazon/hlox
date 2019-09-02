@@ -23,33 +23,33 @@ newEnvironment = Environment Nothing <$> newIORef H.empty
 childEnvironment :: Environment -> IO Environment
 childEnvironment e = Environment (Just e) <$> newIORef H.empty
 
-get :: Environment -> Token -> IO Dynamic
-get e name = do
+get :: Token -> Environment -> IO Dynamic
+get name e = do
   r <- H.lookup (tokenLexeme name) <$> readIORef (environmentValues e)
   case (r,environmentEnclosing e) of
     (Just v,_) -> return v
-    (Nothing,Just e') -> get e' name
+    (Nothing,Just e') -> get name e'
     (Nothing,Nothing) -> throwIO (RuntimeError name (T.concat ["Undefined variable '",tokenLexeme name,"'."]))
 
-assign :: Environment -> Token -> Dynamic -> IO ()
-assign e name value = do
+assign :: Token -> Dynamic -> Environment -> IO ()
+assign name value e = do
   c <- H.member (tokenLexeme name) <$> readIORef (environmentValues e)
   case (c,environmentEnclosing e) of
     (True,_) -> modifyIORef (environmentValues e)
                             (H.insert (tokenLexeme name) value)
-    (False,Just e') -> assign e' name value
+    (False,Just e') -> assign name value e'
     (False,Nothing) -> throwIO (RuntimeError name (T.concat ["Undefined variable '",tokenLexeme name,"'."]))
 
-define :: Environment -> Text -> Dynamic -> IO ()
-define e name value = modifyIORef (environmentValues e) (H.insert name value)
+define :: Text -> Dynamic -> Environment -> IO ()
+define name value e = modifyIORef (environmentValues e) (H.insert name value)
 
 ancestor :: Environment -> Int -> Environment
 ancestor e 0 = e
 ancestor e i = ancestor (fromJust $ environmentEnclosing e) (i-1)
 
-getAt :: Environment -> Int -> Text -> IO Dynamic
-getAt e d name = fmap (H.! name) $ readIORef $ environmentValues $ ancestor e d
+getAt :: Int -> Text -> Environment -> IO Dynamic
+getAt d name e = fmap (H.! name) $ readIORef $ environmentValues $ ancestor e d
 
-assignAt :: Environment -> Int -> Token -> Dynamic -> IO ()
-assignAt e d name value =
+assignAt :: Int -> Token -> Dynamic -> Environment -> IO ()
+assignAt d name value e =
   modifyIORef (environmentValues (ancestor e d)) (H.insert (tokenLexeme name) value)

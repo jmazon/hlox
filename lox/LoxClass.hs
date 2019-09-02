@@ -8,6 +8,7 @@ import Control.Applicative
 import Data.Unique
 import Data.Dynamic
 import Data.Text (Text)
+import Control.Monad.Trans
 
 import LoxCallable (LoxCallable,arity,call,toString,callableId)
 import LoxFunction (LoxFunction,bind)
@@ -22,10 +23,10 @@ instance LoxCallable LoxClass where
   arity c = case findMethod c "init" of
     Just initializer -> arity initializer
     Nothing -> 0
-  call c i arguments = do
-    inst <- newInstance c
+  call c arguments = do
+    inst <- liftIO $ newInstance c
     let initializer = findMethod c "init"
-    maybe (return ()) (flip bind inst >=> \c' -> void $ call c' i arguments) initializer
+    maybe (return ()) (liftIO . flip bind inst >=> \c' -> void $ call c' arguments) initializer
     return (toDyn inst)
   toString = className
   callableId = classId

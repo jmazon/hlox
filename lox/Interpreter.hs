@@ -8,7 +8,6 @@ import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
 import Control.Monad
 import Control.Exception hiding (evaluate)
-import System.IO.Unsafe
 import System.Clock (TimeSpec(TimeSpec),getTime,Clock(Monotonic))
 import Numeric
 import Data.Unique
@@ -31,18 +30,17 @@ import LoxFunction (LoxFunction,newFunction,bind)
 import Return (Return(Return))
 import LoxCallable (LoxCallable,arity,call,toString,callableId)
 
-data Interpreter = Interpreter { interpreterEnvironment :: Environment
+data Interpreter = Interpreter { globals :: Environment
+                               , interpreterEnvironment :: Environment
                                , interpreterLocals :: HashMap ExprKey Int}
 
-globals :: Environment
-{-# NOINLINE globals #-}
-globals = unsafePerformIO $ do
-  g <- newEnvironment
-  define g "clock" . toDyn . Native 0 nativeClock =<< newUnique
-  return g
-
-newInterpreter :: Interpreter
-newInterpreter = Interpreter globals H.empty
+newInterpreter :: IO Interpreter
+newInterpreter = do
+  g <- do
+    g <- newEnvironment
+    define g "clock" . toDyn . Native 0 nativeClock =<< newUnique
+    return g
+  return $ Interpreter g g H.empty
 
 interpret :: Interpreter -> [Stmt] -> IO (Interpreter,Maybe RuntimeError)
 interpret i statements = do
@@ -92,7 +90,7 @@ evaluate i (Assign name key value) = do
   v <- evaluate i value
   let distance = H.lookup key (interpreterLocals i)
   case distance of Just d -> assignAt (interpreterEnvironment i) d name v
-                   Nothing -> assign globals name v
+                   Nothing -> assign (globals i) name v
   return v
 evaluate i (Binary left operator right) = do
   l <- evaluate i left
@@ -183,7 +181,7 @@ lookupVariable i name key = do
   let distance = H.lookup key (interpreterLocals i)
   case distance of
     Just d -> getAt (interpreterEnvironment i) d (tokenLexeme name)
-    Nothing -> get globals name
+    Nothing -> get (globals i) name
 
 getNumberOperand :: Token -> Dynamic -> IO Double
 getNumberOperand operator operand

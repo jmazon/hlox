@@ -18,12 +18,13 @@ import RuntimeError (RuntimeError(RuntimeError))
 main :: IO ()
 main = do
   args <- getArgs
+  interpreter <- newInterpreter
   if length args > 1
     then do putStrLn "Usage: hlox [script]"
             exitWith $ ExitFailure 64
     else if length args == 1
-         then runFile newInterpreter (head args)
-         else runPrompt newInterpreter
+         then runFile interpreter (head args)
+         else runPrompt interpreter
 
 runFile :: Interpreter -> FilePath -> IO ()
 runFile interpreter path = do

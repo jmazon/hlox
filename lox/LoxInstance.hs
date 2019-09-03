@@ -26,7 +26,7 @@ getP i name = do
   r <- H.lookup (tokenLexeme name) <$> liftIO (readIORef (instanceFields i))
   case r of Just v -> return v
             Nothing -> case findMethod (instanceClass i) (tokenLexeme name) of
-              Just m -> toDyn <$> bind m i
+              Just m -> toDyn <$> bind i m
               Nothing -> liftIO (throwIO (RuntimeError name (T.concat ["Undefined property '",tokenLexeme name,"'."])))
 
 setP :: MonadIO m => LoxInstance -> Token -> Dynamic -> m ()

@@ -80,7 +80,7 @@ evaluate (Super _ key method) = do
   -- "this" is always one level nearer than "super"'s environment
   Just object <- fmap fromDynamic . getAt (distance - 1) "this" =<< asks environment
   case findMethod superclass (tokenLexeme method) of
-    Just m -> toDyn <$> bind m object
+    Just m -> toDyn <$> bind object m
     Nothing -> throwIO' (RuntimeError method (T.concat ["Undefined property '",tokenLexeme method,"'."]))
 evaluate (This keyword key) = lookupVariable keyword key
 evaluate (Grouping expr) = evaluate expr
@@ -157,7 +157,7 @@ execute (Function f@(FunDecl name _ _)) = do
 execute (If condition thenBranch elseBranch) = do
   c <- isTruthy <$> evaluate condition
   if c then execute thenBranch
-    else maybe (pure ()) execute elseBranch
+       else mapM_ execute elseBranch
 execute (Print value) = do
   v <- evaluate value
   liftIO $ T.putStrLn (stringify v)

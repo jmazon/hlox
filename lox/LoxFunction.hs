@@ -34,8 +34,8 @@ newFunction :: MonadIO m => FunDecl -> Environment -> Bool -> m LoxFunction
 newFunction decl closure isInit = LoxFunction decl closure isInit <$>
                                   liftIO newUnique
 
-bind :: MonadIO m => LoxFunction -> LoxInstance -> m LoxFunction
-bind f inst = do
+bind :: MonadIO m => LoxInstance -> LoxFunction -> m LoxFunction
+bind inst f = do
   e <- childEnvironment (lfunClosure f)
   define "this" (toDyn inst) e
   newFunction (lfunDeclaration f) e (lfunIsInitializer f)

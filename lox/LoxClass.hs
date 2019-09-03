@@ -26,7 +26,7 @@ instance LoxCallable LoxClass where
   call c arguments = do
     inst <- newInstance c
     let initializer = findMethod c "init"
-    maybe (return ()) (flip bind inst >=> \c' -> void $ call c' arguments) initializer
+    mapM_ (bind inst >=> flip call arguments) initializer
     return (toDyn inst)
   toString = className
   callableId = classId

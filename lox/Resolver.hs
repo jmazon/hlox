@@ -69,7 +69,7 @@ resolveS (Return keyword value) = do
   mapM_ resolveE value
 resolveS (Var name initializer) = do
   declare name
-  maybe (return ()) resolveE  initializer
+  mapM_ resolveE initializer
   define name
 resolveS (While condition body) = do
   resolveE condition

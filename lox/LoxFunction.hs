@@ -19,21 +19,22 @@ data LoxFunction = LoxFunction { lfunDeclaration :: FunDecl, lfunClosure :: Envi
 instance LoxCallable LoxFunction where
   arity (LoxFunction (FunDecl _ params _) _ _ _) = length params
   call (LoxFunction (FunDecl _ params body) closure isInitializer _) arguments = do
-    environment <- liftIO $ childEnvironment closure
-    liftIO $ forM_ (zip params arguments) $ \(p,a) ->
+    environment <- childEnvironment closure
+    forM_ (zip params arguments) $ \(p,a) ->
       define (tokenLexeme p) a environment
-    flip catchError (\(Return.Return v) -> liftIO $ if isInitializer
-                                                    then getAt 0 "this" closure
-                                                    else return v) $ do
+    flip catchError (\(Return.Return v) -> if isInitializer
+                                           then getAt 0 "this" closure
+                                           else return v) $ do
       executeBlock body environment
-      liftIO $ if isInitializer then getAt 0 "this" closure else return (toDyn ())
+      if isInitializer then getAt 0 "this" closure else return (toDyn ())
   callableId = lfunId
   toString (LoxFunction (FunDecl name _ _) _ _ _) = T.concat ["<fn ",tokenLexeme name,">"]
 
-newFunction :: FunDecl -> Environment -> Bool -> IO LoxFunction
-newFunction decl closure isInit = LoxFunction decl closure isInit <$> newUnique
+newFunction :: MonadIO m => FunDecl -> Environment -> Bool -> m LoxFunction
+newFunction decl closure isInit = LoxFunction decl closure isInit <$>
+                                  liftIO newUnique
 
-bind :: LoxFunction -> LoxInstance -> IO LoxFunction
+bind :: MonadIO m => LoxFunction -> LoxInstance -> m LoxFunction
 bind f inst = do
   e <- childEnvironment (lfunClosure f)
   define "this" (toDyn inst) e

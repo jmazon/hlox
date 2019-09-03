@@ -24,15 +24,15 @@ instance LoxCallable LoxClass where
     Just initializer -> arity initializer
     Nothing -> 0
   call c arguments = do
-    inst <- liftIO $ newInstance c
+    inst <- newInstance c
     let initializer = findMethod c "init"
-    maybe (return ()) (liftIO . flip bind inst >=> \c' -> void $ call c' arguments) initializer
+    maybe (return ()) (flip bind inst >=> \c' -> void $ call c' arguments) initializer
     return (toDyn inst)
   toString = className
   callableId = classId
 
-newClass :: Text -> Maybe LoxClass -> HashMap Text LoxFunction -> IO LoxClass
-newClass name super methods = LoxClass name super methods <$> newUnique
+newClass :: MonadIO m => Text -> Maybe LoxClass -> HashMap Text LoxFunction -> m LoxClass
+newClass name super methods = LoxClass name super methods <$> liftIO newUnique
 
 findMethod :: LoxClass -> Text -> Maybe LoxFunction
 findMethod c name = H.lookup name (classMethods c) <|>

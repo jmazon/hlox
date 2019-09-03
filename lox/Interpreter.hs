@@ -47,15 +47,16 @@ newInterpreter = do
     return g
   return $ Interpreter g g H.empty
 
-interpret :: Interpreter -> [Stmt] -> IO (Interpreter,Maybe RuntimeError)
-interpret i statements = do
-  rte <- (runReaderT (runExceptT (mapM_ execute statements)) i >> return Nothing) `catch` (return . Just)
-  return (i,rte)
+interpret :: Interpreter -> [Stmt] -> IO (Maybe RuntimeError)
+interpret i statements = handle (return . Just) $ do
+  r <- runReaderT (runExceptT (mapM_ execute statements)) i
+  case r of Right () -> return Nothing
+            Left (Return.Return _) -> error "Internal error: leaked return."
 
 evaluate :: Expr -> MI Dynamic
-evaluate (Literal LNull) = return (toDyn ())
+evaluate (Literal LNull)       = return (toDyn ())
 evaluate (Literal (LNumber n)) = return (toDyn n)
-evaluate (Literal (LBool b)) = return (toDyn b)
+evaluate (Literal (LBool b))   = return (toDyn b)
 evaluate (Literal (LString s)) = return (toDyn s)
 evaluate (Logical left operator right) = do
   l <- evaluate left
@@ -65,22 +66,21 @@ evaluate (Logical left operator right) = do
     _ -> evaluate right
 evaluate (Get object name) = do
   o <- evaluate object
-  case fromDynamic o of Just inst -> liftIO $ getP inst name
+  case fromDynamic o of Just inst -> getP inst name
                         Nothing -> throwIO' (RuntimeError name "Only instances have properties.")
 evaluate (Set object name value) = do
   o <- evaluate object
-  case fromDynamic o of Just inst -> do
-                          v <- evaluate value
-                          liftIO $ setP inst name v
-                          return v
+  case fromDynamic o of Just inst -> do v <- evaluate value
+                                        setP inst name v
+                                        return v
                         Nothing -> throwIO' (RuntimeError name "Only instances have fields.")
 evaluate (Super _ key method) = do
   Just distance <- H.lookup key <$> asks locals
-  Just superclass <- fmap fromDynamic . liftIO . getAt distance "super" =<< asks environment
+  Just superclass <- fmap fromDynamic . getAt distance "super" =<< asks environment
   -- "this" is always one level nearer than "super"'s environment
-  Just object <- fmap fromDynamic . liftIO . getAt (distance - 1) "this" =<< asks environment
+  Just object <- fmap fromDynamic . getAt (distance - 1) "this" =<< asks environment
   case findMethod superclass (tokenLexeme method) of
-    Just m -> liftIO $ toDyn <$> bind m object
+    Just m -> toDyn <$> bind m object
     Nothing -> throwIO' (RuntimeError method (T.concat ["Undefined property '",tokenLexeme method,"'."]))
 evaluate (This keyword key) = lookupVariable keyword key
 evaluate (Grouping expr) = evaluate expr
@@ -88,19 +88,19 @@ evaluate (Unary operator right) = do
   r <- evaluate right
   case tokenType operator of
     TT.Bang -> return (toDyn (not (isTruthy r)))
-    TT.Minus -> liftIO $ toDyn . negate <$> getNumberOperand operator r
+    TT.Minus -> toDyn . negate <$> getNumberOperand operator r
     _ -> return (toDyn ()) -- XXX why?
 evaluate (Variable name key) = lookupVariable name key
 evaluate (Assign name key value) = do
   v <- evaluate value
   distance <- H.lookup key <$> asks locals
-  case distance of Just d -> liftIO . assignAt d name v =<< asks environment
-                   Nothing -> liftIO . assign name v =<< asks globals
+  case distance of Just d -> assignAt d name v =<< asks environment
+                   Nothing -> assign name v =<< asks globals
   return v
 evaluate (Binary left operator right) = do
   l <- evaluate left
   r <- evaluate right
-  liftIO $ case tokenType operator of
+  case tokenType operator of
     TT.Greater      -> toDyn . uncurry (>)  <$> getNumberOperands operator l r
     TT.GreaterEqual -> toDyn . uncurry (>=) <$> getNumberOperands operator l r
     TT.Less         -> toDyn . uncurry (<)  <$> getNumberOperands operator l r
@@ -111,10 +111,10 @@ evaluate (Binary left operator right) = do
 
     TT.Plus | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl + vr :: Double))
             | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl `T.append` vr))
-            | otherwise -> throwIO (RuntimeError operator "Operands must be two numbers or two strings.")
+            | otherwise -> throwIO' (RuntimeError operator "Operands must be two numbers or two strings.")
     TT.Minus -> toDyn . uncurry (-) <$> getNumberOperands operator l r
     TT.Slash -> toDyn . uncurry (/) <$> getNumberOperands operator l r
-    TT.Star -> toDyn . uncurry (*) <$> getNumberOperands operator l r
+    TT.Star  -> toDyn . uncurry (*) <$> getNumberOperands operator l r
     _ -> return (toDyn ()) -- XXX why?
 evaluate (Call callee paren arguments) = do
   c <- evaluate callee
@@ -137,23 +137,23 @@ execute (Class name superclass methods) = do
     case fromDynamic scVal of
       Just scClass -> return scClass
       Nothing -> throwIO' (RuntimeError (variableName scVar) "Superclass must be a class.")
-  liftIO . define (tokenLexeme name) (toDyn ()) =<< asks environment
+  define (tokenLexeme name) (toDyn ()) =<< asks environment
   env <- case sc of
     Just sc' -> do
-      env <- liftIO . childEnvironment =<< asks environment
-      liftIO $ define "super" (toDyn sc') env
+      env <- childEnvironment =<< asks environment
+      define "super" (toDyn sc') env
       return env
     Nothing -> asks environment
-  methods' <- liftIO $ fmap H.fromList $ forM methods $ \method -> do
+  methods' <- fmap H.fromList $ forM methods $ \method -> do
     function <- newFunction method env (tokenLexeme (functionName method) == "init")
     return (tokenLexeme (functionName method),function)
-  klass <- liftIO $ newClass (tokenLexeme name) sc methods'
-  liftIO . assign name (toDyn klass) =<< asks environment
+  klass <- newClass (tokenLexeme name) sc methods'
+  assign name (toDyn klass) =<< asks environment
 execute (Expression expr) = void $ evaluate expr
 execute (Function f@(FunDecl name _ _)) = do
   e <- asks environment
-  fun <- liftIO $ toDyn <$> newFunction f e False
-  liftIO $ define (tokenLexeme name) fun e
+  fun <- toDyn <$> newFunction f e False
+  define (tokenLexeme name) fun e
 execute (If condition thenBranch elseBranch) = do
   c <- isTruthy <$> evaluate condition
   if c then execute thenBranch
@@ -166,11 +166,11 @@ execute (Stmt.Return _ value) = do
   throwError (Return.Return v)
 execute (Var name initializer) = do
   value <- maybe (return (toDyn ())) evaluate initializer
-  liftIO . define (tokenLexeme name) value =<< asks environment
+  define (tokenLexeme name) value =<< asks environment
 execute (While condition body) =
   whileM_ (isTruthy <$> evaluate condition) $ execute body
 execute (Block statements) = executeBlock statements =<<
-                             liftIO . childEnvironment =<< asks environment
+                             childEnvironment =<< asks environment
 
 executeBlock :: [Stmt] -> Environment -> MI ()
 executeBlock statements env =
@@ -184,19 +184,19 @@ lookupVariable :: Token -> ExprKey -> MI Dynamic
 lookupVariable name key = do
   distance <- H.lookup key <$> asks locals
   case distance of
-    Just d -> liftIO . getAt d (tokenLexeme name) =<< asks environment
-    Nothing -> liftIO . get name =<< asks globals
+    Just d -> getAt d (tokenLexeme name) =<< asks environment
+    Nothing -> get name =<< asks globals
 
-getNumberOperand :: Token -> Dynamic -> IO Double
+getNumberOperand :: MonadIO m => Token -> Dynamic -> m Double
 getNumberOperand operator operand
   | Just (d :: Double) <- fromDynamic operand = return d
-  | otherwise = throwIO (RuntimeError operator "Operand must be a number.")
+  | otherwise = throwIO' (RuntimeError operator "Operand must be a number.")
 
-getNumberOperands :: Token -> Dynamic -> Dynamic -> IO (Double,Double)
+getNumberOperands :: MonadIO m => Token -> Dynamic -> Dynamic -> m (Double,Double)
 getNumberOperands operator left right
   | Just (a :: Double) <- fromDynamic left
   , Just (b :: Double) <- fromDynamic right = return (a,b)
-  | otherwise = throwIO (RuntimeError operator "Operands must be numbers.")
+  | otherwise = throwIO' (RuntimeError operator "Operands must be numbers.")
 
 isTruthy :: Dynamic -> Bool
 isTruthy v | Just () <- fromDynamic v = False
@@ -224,17 +224,17 @@ stringify v
   | otherwise = error "Internal error: unknown type to stringify" -- XXX
 
 data Native = Native { nativeArity :: Int
-                     , nativeFn :: [Dynamic] -> IO Dynamic
+                     , nativeFn :: [Dynamic] -> MI Dynamic
                      , nativeId :: Unique }
 instance LoxCallable Native where
   arity = nativeArity
-  call n = liftIO . nativeFn n
+  call = nativeFn
   toString _ = "<native fn>"
   callableId = nativeId
 
-nativeClock :: [Dynamic] -> IO Dynamic
+nativeClock :: [Dynamic] -> MI Dynamic
 nativeClock [] = do
-  TimeSpec sec nsec <- getTime Monotonic
+  TimeSpec sec nsec <- liftIO (getTime Monotonic)
   return $ toDyn (fromIntegral sec + fromIntegral nsec / 1000000000 :: Double)
 nativeClock _ = error "Internal error: clock called with arguments" -- XXX
 
@@ -245,5 +245,5 @@ dynToCallable d = IsCallable <$> (fromDynamic d :: Maybe LoxFunction) <|>
                   IsCallable <$> (fromDynamic d :: Maybe Native) <|>
                   IsCallable <$> (fromDynamic d :: Maybe LoxClass)
 
-throwIO' :: RuntimeError -> MI a
+throwIO' :: MonadIO m => RuntimeError -> m a
 throwIO' = liftIO . throwIO

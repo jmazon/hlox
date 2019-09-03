@@ -8,6 +8,7 @@ import Control.Exception
 import Data.Dynamic
 import Data.Text (Text)
 import qualified Data.Text as T
+import Control.Monad.Trans
 
 import Token (Token,tokenLexeme)
 import LoxClass (LoxClass,findMethod)
@@ -17,17 +18,17 @@ import LoxFunction (bind)
 data LoxInstance = LoxInstance { instanceClass :: LoxClass
                                , instanceFields :: IORef (HashMap Text Dynamic)}
 
-newInstance :: LoxClass -> IO LoxInstance
-newInstance c = LoxInstance c <$> newIORef H.empty
+newInstance :: MonadIO m => LoxClass -> m LoxInstance
+newInstance c = LoxInstance c <$> liftIO (newIORef H.empty)
 
-getP :: LoxInstance -> Token -> IO Dynamic
+getP :: MonadIO m => LoxInstance -> Token -> m Dynamic
 getP i name = do
-  r <- H.lookup (tokenLexeme name) <$> readIORef (instanceFields i)
+  r <- H.lookup (tokenLexeme name) <$> liftIO (readIORef (instanceFields i))
   case r of Just v -> return v
             Nothing -> case findMethod (instanceClass i) (tokenLexeme name) of
               Just m -> toDyn <$> bind m i
-              Nothing -> throwIO (RuntimeError name (T.concat ["Undefined property '",tokenLexeme name,"'."]))
+              Nothing -> liftIO (throwIO (RuntimeError name (T.concat ["Undefined property '",tokenLexeme name,"'."])))
 
-setP :: LoxInstance -> Token -> Dynamic -> IO ()
+setP :: MonadIO m => LoxInstance -> Token -> Dynamic -> m ()
 setP i name value =
-  modifyIORef (instanceFields i) (H.insert (tokenLexeme name) value)
+  liftIO $ modifyIORef (instanceFields i) (H.insert (tokenLexeme name) value)

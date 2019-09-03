@@ -16,7 +16,9 @@ data Expr =
   | Set { setObject :: Expr, setName :: Token, setValue :: Expr }
   | Super { superKeyword :: Token, superId :: !ExprKey, superMethod :: Token }
   | This { thisKeyword :: Token, thisId :: !ExprKey }
-  | Unary { unaryOperator :: Token, unaryRight :: Expr }
+  | Unary { unaryOperator :: !UnaryOp, unaryToken :: !Token, unaryRight :: Expr }
   | Variable { variableName :: Token, variableId :: !ExprKey }
 
 newtype ExprKey = ExprKey Int deriving (Eq,Hashable)
+
+data UnaryOp = UnaryBang | UnaryMinus

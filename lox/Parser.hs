@@ -199,9 +199,9 @@ multiplication :: MP Expr
 multiplication = binary [TT.Slash,TT.Star] unary
 
 unary :: MP Expr
-unary = do
-  m <- match [TT.Bang,TT.Minus]
-  if m then liftM2 Unary previous unary else call
+unary = caseM [ (match [TT.Bang],  liftM2 (Unary UnaryBang) previous unary)
+              , (match [TT.Minus], liftM2 (Unary UnaryMinus) previous unary) ]
+          call
 
 finishCall :: Expr -> MP Expr
 finishCall callee = do

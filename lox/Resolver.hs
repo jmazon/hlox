@@ -106,7 +106,7 @@ resolveE (This keyword key) = do
   cc <- asks currentClass
   case cc of CT_None -> resolverError keyword "Cannot use 'this' outside of a class."
              _ -> resolveLocal key keyword
-resolveE (Unary _ right) = resolveE right
+resolveE (Unary _ _ right) = resolveE right
 resolveE (Variable name key) = do
   whenM (not . isEmpty <$> get) $
     whenM ((== Just False) . H.lookup (tokenLexeme name) . peek <$> get) $

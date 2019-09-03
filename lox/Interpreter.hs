@@ -84,12 +84,11 @@ evaluate (Super _ key method) = do
     Nothing -> throwIO' (RuntimeError method (T.concat ["Undefined property '",tokenLexeme method,"'."]))
 evaluate (This keyword key) = lookupVariable keyword key
 evaluate (Grouping expr) = evaluate expr
-evaluate (Unary operator right) = do
+evaluate (Unary operator token right) = do
   r <- evaluate right
-  case tokenType operator of
-    TT.Bang -> return (toDyn (not (isTruthy r)))
-    TT.Minus -> toDyn . negate <$> getNumberOperand operator r
-    _ -> return (toDyn ()) -- XXX why?
+  case operator of
+    UnaryBang -> return (toDyn (not (isTruthy r)))
+    UnaryMinus -> toDyn . negate <$> getNumberOperand token r
 evaluate (Variable name key) = lookupVariable name key
 evaluate (Assign name key value) = do
   v <- evaluate value

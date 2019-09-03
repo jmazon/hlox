@@ -20,8 +20,7 @@ import Control.Monad.Reader
 import Control.Monad.Except
 
 import Util
-import qualified TokenType as TT
-import Token (Token,tokenType,tokenLexeme,Literal(LNull,LBool,LNumber,LString))
+import Token (Token,tokenLexeme,Literal(LNull,LBool,LNumber,LString))
 import Expr
 import RuntimeError (RuntimeError(RuntimeError))
 import Stmt
@@ -60,9 +59,9 @@ evaluate (Literal (LBool b))   = return (toDyn b)
 evaluate (Literal (LString s)) = return (toDyn s)
 evaluate (Logical left operator right) = do
   l <- evaluate left
-  case (tokenType operator,isTruthy l) of
-    (TT.Or,True) -> return l
-    (TT.And,False) -> return l
+  case (operator,isTruthy l) of
+    (LogOr,True) -> return l
+    (LogAnd,False) -> return l
     _ -> evaluate right
 evaluate (Get object name) = do
   o <- evaluate object
@@ -96,25 +95,24 @@ evaluate (Assign name key value) = do
   case distance of Just d -> assignAt d name v =<< asks environment
                    Nothing -> assign name v =<< asks globals
   return v
-evaluate (Binary left operator right) = do
+evaluate (Binary left token operator right) = do
   l <- evaluate left
   r <- evaluate right
-  case tokenType operator of
-    TT.Greater      -> toDyn . uncurry (>)  <$> getNumberOperands operator l r
-    TT.GreaterEqual -> toDyn . uncurry (>=) <$> getNumberOperands operator l r
-    TT.Less         -> toDyn . uncurry (<)  <$> getNumberOperands operator l r
-    TT.LessEqual    -> toDyn . uncurry (<=) <$> getNumberOperands operator l r
+  case operator of
+    BinGreater      -> toDyn . uncurry (>)  <$> getNumberOperands token l r
+    BinGreaterEqual -> toDyn . uncurry (>=) <$> getNumberOperands token l r
+    BinLess         -> toDyn . uncurry (<)  <$> getNumberOperands token l r
+    BinLessEqual    -> toDyn . uncurry (<=) <$> getNumberOperands token l r
 
-    TT.BangEqual    -> return (toDyn (not (isEqual l r)))
-    TT.EqualEqual   -> return (toDyn (isEqual l r))
+    BinBangEqual    -> return (toDyn (not (isEqual l r)))
+    BinEqualEqual   -> return (toDyn (isEqual l r))
 
-    TT.Plus | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl + vr :: Double))
+    BinPlus | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl + vr :: Double))
             | Just vl <- fromDynamic l, Just vr <- fromDynamic r -> return (toDyn (vl `T.append` vr))
-            | otherwise -> throwIO' (RuntimeError operator "Operands must be two numbers or two strings.")
-    TT.Minus -> toDyn . uncurry (-) <$> getNumberOperands operator l r
-    TT.Slash -> toDyn . uncurry (/) <$> getNumberOperands operator l r
-    TT.Star  -> toDyn . uncurry (*) <$> getNumberOperands operator l r
-    _ -> return (toDyn ()) -- XXX why?
+            | otherwise -> throwIO' (RuntimeError token "Operands must be two numbers or two strings.")
+    BinMinus -> toDyn . uncurry (-) <$> getNumberOperands token l r
+    BinSlash -> toDyn . uncurry (/) <$> getNumberOperands token l r
+    BinStar  -> toDyn . uncurry (*) <$> getNumberOperands token l r
 evaluate (Call callee paren arguments) = do
   c <- evaluate callee
   as <- mapM evaluate arguments

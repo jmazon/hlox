@@ -79,7 +79,7 @@ resolveE :: Expr -> MR ()
 resolveE (Assign name key value) = do
   resolveE value
   resolveLocal key name
-resolveE (Binary left _ right) = do
+resolveE (Binary left _ _ right) = do
   resolveE left
   resolveE right
 resolveE (Call callee _ arguments) = do

@@ -182,21 +182,29 @@ assignment = do
     else return expr
 
 or,and :: MP Expr
-or = leftAssoc [TT.Or] Logical and
-and = leftAssoc [TT.And] Logical equality
+or = leftAssoc [logical TT.Or LogOr] and
+and = leftAssoc [logical TT.And LogAnd] equality
+
+logical :: TokenType -> LogicalOp -> (TokenType,Expr -> Token -> Expr -> Expr)
+logical tt o = (tt,\l _ r -> Logical l o r)
 
 equality :: MP Expr
-equality = binary [TT.BangEqual,TT.EqualEqual] comparison
+equality = binary [ (TT.BangEqual,BinBangEqual)
+                  , (TT.EqualEqual,BinEqualEqual) ] comparison
 
 comparison :: MP Expr
-comparison = binary [TT.Greater,TT.GreaterEqual,TT.Less,TT.LessEqual]
-                      addition
+comparison = binary [ (TT.Greater,BinGreater)
+                    , (TT.GreaterEqual,BinGreaterEqual)
+                    , (TT.Less,BinLess)
+                    , (TT.LessEqual,BinLessEqual) ] addition
 
 addition :: MP Expr
-addition = binary [TT.Minus,TT.Plus] multiplication
+addition = binary [ (TT.Minus,BinMinus)
+                  , (TT.Plus,BinPlus) ] multiplication
 
 multiplication :: MP Expr
-multiplication = binary [TT.Slash,TT.Star] unary
+multiplication = binary [ (TT.Slash,BinSlash)
+                        , (TT.Star,BinStar) ] unary
 
 unary :: MP Expr
 unary = caseM [ (match [TT.Bang],  liftM2 (Unary UnaryBang) previous unary)
@@ -245,18 +253,19 @@ primary = caseM
         return (Grouping expr)) ]
   (throwError =<< parseError "Expect expression." =<< peek)
   
-binary ::  [TokenType] -> MP Expr -> MP Expr
-binary toks next = leftAssoc toks Binary next
+binary ::  [(TokenType,BinaryOp)] -> MP Expr -> MP Expr
+binary tokops next = leftAssoc (fmap bin tokops) next where
+  bin (tt,bo) = (tt,\l t r -> Binary l t bo r)
 {-# ANN binary ("HLint: ignore Eta reduce" :: String) #-}
 
-leftAssoc :: [TokenType] -> (Expr -> Token -> Expr -> Expr) -> MP Expr -> MP Expr
-leftAssoc toks node next = do
+leftAssoc :: [(TokenType,Expr -> Token -> Expr -> Expr)] -> MP Expr -> MP Expr
+leftAssoc tokops next = do
   expr <- next
-  fmap (foldl (\l (o,r) -> node l o r) expr) $
-    whileM (match toks) $ do
+  fmap (foldl (\l (o,r,node) -> node l o r) expr) $
+    whileJust (firstM (match . pure . fst) tokops) $ \(_,node) -> do
       operator <- previous
       right <- next
-      return (operator,right)
+      return (operator,right,node)
 
 match :: [TokenType] -> MP Bool
 match = anyM f where

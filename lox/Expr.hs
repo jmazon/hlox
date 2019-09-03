@@ -7,12 +7,12 @@ import Token (Token,Literal)
 
 data Expr =
     Assign { assignName :: Token, assignId :: !ExprKey, assignValue :: Expr }
-  | Binary { binaryLeft :: Expr, binaryOperator :: Token, binaryRight :: Expr }
+  | Binary { binaryLeft :: Expr, binaryToken :: !Token, binaryOperator :: !BinaryOp, binaryRight :: Expr }
   | Call { callCallee :: Expr, callParen :: Token, callArguments :: [Expr] }
   | Get { getObject :: Expr, getName :: Token }
   | Grouping { groupingExpression :: Expr }
   | Literal { literalValue :: Literal }
-  | Logical { logicalLeft :: Expr, logicalOperator :: Token, logicalRight :: Expr }
+  | Logical { logicalLeft :: Expr, logicalOperator :: !LogicalOp, logicalRight :: Expr }
   | Set { setObject :: Expr, setName :: Token, setValue :: Expr }
   | Super { superKeyword :: Token, superId :: !ExprKey, superMethod :: Token }
   | This { thisKeyword :: Token, thisId :: !ExprKey }
@@ -22,3 +22,9 @@ data Expr =
 newtype ExprKey = ExprKey Int deriving (Eq,Hashable)
 
 data UnaryOp = UnaryBang | UnaryMinus
+data BinaryOp = BinGreater | BinGreaterEqual
+              | BinLess | BinLessEqual
+              | BinBangEqual | BinEqualEqual
+              | BinPlus | BinMinus
+              | BinSlash | BinStar
+data LogicalOp = LogOr | LogAnd

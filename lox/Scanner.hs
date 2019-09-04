@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 module Scanner (scanTokens) where
 
 import Data.Bool
@@ -12,9 +13,10 @@ import qualified Data.Text as T
 import qualified Data.Text.Read as T
 import Control.Monad.RWS.Strict
 import Data.DList
+import Data.Dynamic
 
 import Util
-import Token (Token(Token),Literal(LNull,LNumber,LString))
+import Token (Token(Token))
 import qualified TokenType as TT
 import TokenType (TokenType)
 
@@ -31,7 +33,7 @@ scanTokens source = snd $ execRWS m source (ScannerState 0 0 1) where
            modify (\s -> s { start = current s })
            scanToken
          l <- gets line
-         tell (singleton (Token TT.Eof "" LNull l),empty)
+         tell (singleton (Token TT.Eof "" (toDyn ()) l),empty)
   
 isAtEnd :: MS Bool
 isAtEnd = liftM2 (>=) (gets current) (asks T.length)
@@ -44,9 +46,9 @@ advance = do
   liftM2 T.index ask (pred . current <$> get)
 
 addToken :: TT.TokenType -> MS ()
-addToken tokType = addTokenLit tokType LNull
+addToken tokType = addTokenLit tokType (toDyn ())
 
-addTokenLit :: TT.TokenType -> Literal -> MS ()
+addTokenLit :: TT.TokenType -> Dynamic -> MS ()
 addTokenLit tokType literal = do
   text <- lexeme
   l <- gets line
@@ -111,7 +113,7 @@ number = do
     advance_
     whileM_ (isDigit <$> peek) advance_
 
-  addTokenLit TT.Number . LNumber . readRat =<< lexeme
+  addTokenLit TT.Number . toDyn @Double . readRat =<< lexeme
     where readRat t = n where Right (n,_) = T.rational t
 
 string :: MS ()
@@ -130,7 +132,7 @@ string = do
     source <- ask
     s <- get
     let value = substr source (start s + 1) (current s - 1)
-    addTokenLit TT.String (LString value)
+    addTokenLit TT.String (toDyn value)
 
 match :: Char -> MS Bool
 match c = ifM isAtEnd (return False) $ do

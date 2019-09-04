@@ -2,8 +2,9 @@
 module Expr where
 
 import Data.Hashable
+import Data.Dynamic
 
-import Token (Token,Literal)
+import Token (Token)
 
 data Expr =
     Assign { assignName :: Token, assignId :: !ExprKey, assignValue :: Expr }
@@ -11,7 +12,7 @@ data Expr =
   | Call { callCallee :: Expr, callParen :: Token, callArguments :: [Expr] }
   | Get { getObject :: Expr, getName :: Token }
   | Grouping { groupingExpression :: Expr }
-  | Literal { literalValue :: Literal }
+  | Literal { literalValue :: Dynamic }
   | Logical { logicalLeft :: Expr, logicalOperator :: !LogicalOp, logicalRight :: Expr }
   | Set { setObject :: Expr, setName :: Token, setValue :: Expr }
   | Super { superKeyword :: Token, superId :: !ExprKey, superMethod :: Token }

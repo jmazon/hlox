@@ -12,11 +12,12 @@ import Control.Monad.Writer.Strict
 import Control.Monad.State.Strict
 import Control.Monad.Except
 import Data.Either
+import Data.Dynamic
 
 import Util
 import qualified TokenType as TT
 import TokenType (TokenType)
-import Token (Token,tokenLiteral,tokenType,Literal(LNull,LBool))
+import Token (Token,tokenLiteral,tokenType)
 import Expr
 import Stmt
 
@@ -85,7 +86,7 @@ forStatement = do
   body <- statement
 
   let body' = maybe body (\i -> Block [body,Expression i]) increment
-      condition' = fromMaybe (Literal $ LBool True) condition
+      condition' = fromMaybe (Literal $ toDyn True) condition
       body'' = While condition' body'
       body''' = maybe body'' (Block . (: [body''])) initializer
 
@@ -178,7 +179,7 @@ assignment = do
                      return (Assign name u value)
                    Get object name -> return (Set object name value)
                    _ -> parseError "Invalid assignment target." equals
-                        >> return (Literal LNull)
+                        >> return (Literal $ toDyn ())
     else return expr
 
 or,and :: MP Expr
@@ -234,9 +235,9 @@ call = flip runContT pure $ do
 
 primary :: MP Expr
 primary = caseM
-  [ (match [TT.False],return (Literal (LBool False)))
-  , (match [TT.True],return (Literal (LBool True)))
-  , (match [TT.Nil],return (Literal LNull))
+  [ (match [TT.False],return (Literal (toDyn False)))
+  , (match [TT.True],return (Literal (toDyn True)))
+  , (match [TT.Nil],return (Literal (toDyn ())))
   , (match [TT.Number],Literal . tokenLiteral <$> previous)
   , (match [TT.String],Literal . tokenLiteral <$> previous)
   , (match [TT.Super],do

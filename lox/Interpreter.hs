@@ -20,7 +20,7 @@ import Control.Monad.Reader
 import Control.Monad.Except
 
 import Util
-import Token (Token,tokenLexeme,Literal(LNull,LBool,LNumber,LString))
+import Token (Token,tokenLexeme)
 import Expr
 import RuntimeError (RuntimeError(RuntimeError))
 import Stmt
@@ -53,10 +53,7 @@ interpret i statements = handle (return . Just) $ do
             Left (Return.Return _) -> error "Internal error: leaked return."
 
 evaluate :: Expr -> MI Dynamic
-evaluate (Literal LNull)       = return (toDyn ())
-evaluate (Literal (LNumber n)) = return (toDyn n)
-evaluate (Literal (LBool b))   = return (toDyn b)
-evaluate (Literal (LString s)) = return (toDyn s)
+evaluate (Literal l) = return l
 evaluate (Logical left operator right) = do
   l <- evaluate left
   case (operator,isTruthy l) of

@@ -41,9 +41,9 @@ expression = assignment
 
 declaration :: MP (Maybe Stmt)
 declaration =
-  (Just <$> caseM [ (match [TT.Class],classDeclaration)
-                  , (match [TT.Fun],Function <$> function "function")
-                  , (match [TT.Var],varDeclaration) ]
+  (Just <$> caseM [ (match TT.Class,classDeclaration)
+                  , (match TT.Fun,Function <$> function "function")
+                  , (match TT.Var,varDeclaration) ]
               statement)
     `catchError`
   \(_ :: ParseError) -> do
@@ -53,7 +53,7 @@ declaration =
 classDeclaration :: MP Stmt
 classDeclaration = do
   name <- consume TT.Identifier "Expect class name."
-  superclass <- ifM (match [TT.Less]) (consume_ TT.Identifier "Expect superclass name." >>
+  superclass <- ifM (match TT.Less) (consume_ TT.Identifier "Expect superclass name." >>
                                          Just <$> liftM2 Variable previous newUnique)
                       (return Nothing)
   consume_ TT.LeftBrace "Expect '{' before class body."
@@ -63,19 +63,19 @@ classDeclaration = do
   return (Class name superclass methods)
 
 statement :: MP Stmt
-statement = caseM [ (match [TT.For],forStatement)
-                  , (match [TT.If],ifStatement)
-                  , (match [TT.Print],printStatement)
-                  , (match [TT.Return],returnStatement)
-                  , (match [TT.While],whileStatement)
-                  , (match [TT.LeftBrace],Block <$> block)]
+statement = caseM [ (match TT.For,forStatement)
+                  , (match TT.If,ifStatement)
+                  , (match TT.Print,printStatement)
+                  , (match TT.Return,returnStatement)
+                  , (match TT.While,whileStatement)
+                  , (match TT.LeftBrace,Block <$> block) ]
               expressionStatement
 
 forStatement :: MP Stmt
 forStatement = do
   consume_ TT.LeftParen "Expect '(' after 'for'."
-  initializer <- ifM (match [TT.Semicolon]) (return Nothing) $
-                 ifM (match [TT.Var]) (Just <$> varDeclaration) $
+  initializer <- ifM (match TT.Semicolon) (return Nothing) $
+                 ifM (match TT.Var) (Just <$> varDeclaration) $
                  Just <$> expressionStatement
   condition <- ifM (not <$> check TT.Semicolon) (Just <$> expression)
                                                   (return Nothing)
@@ -99,7 +99,7 @@ ifStatement = do
   consume_ TT.RightParen "Expect ')' after if condition."
 
   thenBranch <- statement
-  e <- match [TT.Else]
+  e <- match TT.Else
   elseBranch <- if e then Just <$> statement else return Nothing
 
   return (If condition thenBranch elseBranch)
@@ -120,7 +120,7 @@ returnStatement = do
 varDeclaration :: MP Stmt
 varDeclaration = do
   name <- consume TT.Identifier "Expect variable name."
-  eq <- match [TT.Equal]
+  eq <- match TT.Equal
   initializer <- if eq then Just <$> expression else return Nothing
   consume_ TT.Semicolon "Expect ';' after variable declaration."
   return (Var name initializer)
@@ -145,7 +145,7 @@ function kind = do
   name <- consume TT.Identifier (T.concat ["Expect ",kind," name."])
   consume_ TT.LeftParen (T.concat ["Expect '(' after ",kind," name."])
 
-  let f (i::Int) = flip (ifM (match [TT.Comma])) (return Nothing) $ do
+  let f (i::Int) = flip (ifM (match TT.Comma)) (return Nothing) $ do
         when (i >= 255) $ void $ parseError "Cannot have more than 255 parameters." =<< peek
         Just . (, i+1) <$> c
       c = consume TT.Identifier "Expect parameter name."
@@ -170,7 +170,7 @@ block = do
 assignment :: MP Expr
 assignment = do
   expr <- or
-  eq <- match [TT.Equal]
+  eq <- match TT.Equal
   if eq then do
       equals <- previous
       value <- assignment
@@ -208,13 +208,13 @@ multiplication = binary [ (TT.Slash,BinSlash)
                         , (TT.Star,BinStar) ] unary
 
 unary :: MP Expr
-unary = caseM [ (match [TT.Bang],  liftM2 (Unary UnaryBang) previous unary)
-              , (match [TT.Minus], liftM2 (Unary UnaryMinus) previous unary) ]
+unary = caseM [ (match TT.Bang,  liftM2 (Unary UnaryBang) previous unary)
+              , (match TT.Minus, liftM2 (Unary UnaryMinus) previous unary) ]
           call
 
 finishCall :: Expr -> MP Expr
 finishCall callee = do
-  let f (i::Int) = flip (ifM (match [TT.Comma])) (return Nothing) $ do
+  let f (i::Int) = flip (ifM (match TT.Comma)) (return Nothing) $ do
         when (i >= 255) $ void $ parseError "Cannot have more than 255 arguments." =<< peek
         Just . (, i+1) <$> expression
   arguments <- ifM (not <$> check TT.RightParen)
@@ -227,28 +227,28 @@ call :: MP Expr
 call = flip runContT pure $ do
   expr <- lift primary
   flip execStateT expr $ callCC $ \exit -> forever $
-    caseM [ (lift (lift (match [TT.LeftParen])),put =<< lift . lift . finishCall =<< get)
-          , (lift (lift (match [TT.Dot]))
+    caseM [ (lift (lift (match TT.LeftParen)),put =<< lift . lift . finishCall =<< get)
+          , (lift (lift (match TT.Dot))
             ,do name <- lift $ lift $ consume TT.Identifier "Expect property name after '.'."
                 put . flip Get name =<< get) ]
       (exit ())
 
 primary :: MP Expr
 primary = caseM
-  [ (match [TT.False],return (Literal (toDyn False)))
-  , (match [TT.True],return (Literal (toDyn True)))
-  , (match [TT.Nil],return (Literal (toDyn ())))
-  , (match [TT.Number],Literal . tokenLiteral <$> previous)
-  , (match [TT.String],Literal . tokenLiteral <$> previous)
-  , (match [TT.Super],do
+  [ (match TT.False,return (Literal (toDyn False)))
+  , (match TT.True,return (Literal (toDyn True)))
+  , (match TT.Nil,return (Literal (toDyn ())))
+  , (match TT.Number,Literal . tokenLiteral <$> previous)
+  , (match TT.String,Literal . tokenLiteral <$> previous)
+  , (match TT.Super,do
         keyword <- previous
         consume_ TT.Dot "Expect '.' after 'super'."
         method <- consume TT.Identifier "Expect superclass method name."
         key <- newUnique
         return (Super keyword key method))
-  , (match [TT.This],liftM2 This previous newUnique)
-  , (match [TT.Identifier],liftM2 Variable previous newUnique)
-  , (match [TT.LeftParen],do
+  , (match TT.This,liftM2 This previous newUnique)
+  , (match TT.Identifier,liftM2 Variable previous newUnique)
+  , (match TT.LeftParen,do
         expr <- expression
         consume_ TT.RightParen "Expect ')' after expression."
         return (Grouping expr)) ]
@@ -263,16 +263,15 @@ leftAssoc :: [(TokenType,Expr -> Token -> Expr -> Expr)] -> MP Expr -> MP Expr
 leftAssoc tokops next = do
   expr <- next
   fmap (foldl (\l (o,r,node) -> node l o r) expr) $
-    whileJust (firstM (match . pure . fst) tokops) $ \(_,node) -> do
+    whileJust (firstM (match . fst) tokops) $ \(_,node) -> do
       operator <- previous
       right <- next
       return (operator,right,node)
 
-match :: [TokenType] -> MP Bool
-match = anyM f where
-  f t = do c <- check t
-           when c advance_
-           return c
+match :: TokenType -> MP Bool
+match t = do c <- check t
+             when c advance_
+             return c
 
 consume_ :: TokenType -> Text -> MP ()
 consume_ tt msg = do

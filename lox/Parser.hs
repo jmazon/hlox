@@ -172,7 +172,7 @@ assignment = do
                      return (Assign name u value)
                    Get object name -> return (Set object name value)
                    _ -> parseError "Invalid assignment target." equals
-                        >> return (Literal $ toDyn ())
+                        >> return expr
 
 or,and :: MP Expr
 or = leftAssoc [logical TT.Or LogOr] and

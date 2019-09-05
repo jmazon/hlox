@@ -8,7 +8,7 @@ import Control.Exception
 import Data.Dynamic
 import Data.Text (Text)
 import qualified Data.Text as T
-import Control.Monad.Trans
+import Control.Monad.Trans (MonadIO,liftIO)
 
 import Token (Token,tokenLexeme)
 import LoxClass (LoxClass,findMethod)

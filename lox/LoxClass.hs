@@ -4,11 +4,11 @@ module LoxClass (LoxClass,className,newClass,findMethod) where
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
 import Control.Monad
-import Control.Applicative
+import Control.Applicative ((<|>))
 import Data.Unique
 import Data.Dynamic
 import Data.Text (Text)
-import Control.Monad.Trans
+import Control.Monad.Trans (MonadIO,liftIO)
 
 import LoxCallable (LoxCallable,arity,call,toString,callableId)
 import LoxFunction (LoxFunction,bind)

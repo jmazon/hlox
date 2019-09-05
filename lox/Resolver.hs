@@ -3,8 +3,7 @@ module Resolver (resolve) where
 
 import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
-import Data.List
-import Control.Monad
+import Data.List (findIndex)
 import Data.Text (Text)
 import Control.Monad.RWS.Strict
 import Data.DList

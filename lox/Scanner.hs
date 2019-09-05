@@ -3,8 +3,7 @@
 {-# LANGUAGE TypeApplications #-}
 module Scanner (scanTokens) where
 
-import Data.Bool
-import Control.Monad
+import Data.Bool (bool)
 import qualified Data.HashMap.Strict as M
 import Data.HashMap.Strict (HashMap)
 import Data.Char (isAsciiLower,isAsciiUpper)

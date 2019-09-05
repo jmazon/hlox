@@ -13,5 +13,6 @@ data Token = Token {
   , tokenLine :: !Int
   }
 
+-- Show instance needed to use RuntimeError as an exception
 instance Show Token where
   show (Token t lx lit _) = show t ++ " " ++ T.unpack lx ++ " " ++ show lit

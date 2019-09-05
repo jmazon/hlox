@@ -6,13 +6,12 @@ module Interpreter (Interpreter(Interpreter),newInterpreter,interpret,executeBlo
 import Data.List (foldl')
 import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
-import Control.Monad
 import Control.Exception hiding (evaluate)
 import System.Clock (TimeSpec(TimeSpec),getTime,Clock(Monotonic))
-import Numeric
+import Numeric (showFFloat)
 import Data.Unique
 import Data.Dynamic
-import Control.Applicative
+import Control.Applicative ((<|>))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T

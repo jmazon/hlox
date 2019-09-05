@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 module LoxFunction (LoxFunction,newFunction,bind) where
 
-import Control.Monad
 import Data.Unique
 import Data.Dynamic
 import qualified Data.Text as T

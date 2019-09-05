@@ -1,14 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Environment (Environment,newEnvironment,childEnvironment,define,getAt,assignAt,assign,get) where
 
-import Data.Maybe
+import Data.Maybe (fromJust)
 import Data.IORef
 import qualified Data.HashMap.Strict as H
 import Control.Exception
 import Data.Dynamic
 import Data.Text (Text)
 import qualified Data.Text as T
-import Control.Monad.Trans
+import Control.Monad.Trans (MonadIO,liftIO)
 
 import Token (Token,tokenLexeme)
 import RuntimeError (RuntimeError(RuntimeError))

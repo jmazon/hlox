@@ -21,3 +21,5 @@ data TokenType =
   | Eof
 
   deriving (Show,Eq)
+
+-- Show instance needed for Token

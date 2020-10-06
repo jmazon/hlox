@@ -1,0 +1,165 @@
+
+* First implementation notes
+
+** Summary
+
+I went through part 1, converting the Java code to Haskell on the fly.
+
+I originally intended to do it in Java once to get the hang of it, and
+then have another pass in Haskell.  But I didn't have Java installed
+on my holiday laptop, got "lazy" and skipped the Java altogether.  So
+all Haskell-specific design choices were made on the fly as well, and
+it shows: not all of them end up conducive to nice clean code.
+
+Then I ran it through the extensive jlox tests and patched a few more
+things to reach 100% there.
+
+*** SLOC
+
+After writing chapters: 1331 lines Haskell, 68 Perl. (discounting hs-boot)
+After exhaustive testing: 1345.
+
+*** General conversion strategy
+
+I strived to stick to the original as much as possible.  As line-based
+a conversion as possible.
+
+Files: Sticking to the structure seems to have went well, though it
+may have caused a few mutual dependency headaches.  There's an
+exception for the Lox class: "instance" stuff is there; "static" stuff
+and globals went to a separate file.
+
+"Phase" classes (Scanner, Resolver...): I used a Haskell record type,
+simple fields for constant stuff and IORefs for mutable stuff.
+Methods as functions that take the instance as the first parameter,
+almost always in IO.
+
+AST classes: no inheritance, just two sum types.
+
+No visitors, just plain old pattern matching.
+
+The main actual use of inheritance, LoxCallable, got an existential
+container.
+
+*** General conversion tolerances
+
+I needed a LoxValue type pretty fast.  It started as a sum type over
+nulls, doubles and strings, and ended up as the main cause of mutual
+module recursion.  I'll explore how wrapping it in Data.Dynamic could
+help.  It'd be more faithful to the Java original anyway.
+
+Some parts of the AST had to be nullable (elseBranch, superclass).  I
+used Maybe, and adjusted the class generator to handle a postfix '?'
+on identifiers.
+
+Two parts of the AST actually used Expr/Stmt subtypes.  IIRC: classes
+contain functions for methods and variables for superclasses. In my
+implementation they use the general type and partial functions.  The
+Parser/Interpreter pairing (unsafely) ensures it still works.
+
+I ended up needing AST objet identity comparisons in a few places.
+Those ended up as an extra Data.Unique field.
+
+** Personal tripping points by chapter
+
+*** Scanning
+
+I forgot to advance.  Hahaha.  Well, at least that wasn't too hard to
+pinpoint and fix.
+
+*** Representing code: all good
+*** Parsing expression: ok
+*** Evaluating expressions: ok
+*** Statements and State
+
+Kinda ok.
+
+I do have to complain this chapter removes the ParseError exception
+catch.  This isn't too good for the interpreter's joy-of-use, and
+discourages playing with it to try stuff out.
+
+*** Control flow
+
+I typoed up the for loops implementation.  A glitch if my mental SSA
+converting Java to Haskell.  Not much to do here.
+
+*** Functions
+
+That's where I started getting circular dependencies, but they were
+still manageable then.
+
+*** Resolving and Binding
+
+Hashing on Expr made my Haskeller life miserable, that's where I had
+to drift a bit from the Java reference implementaion and add Unique
+identifiers around.
+
+*** Classes
+
+I incorrectly parsed method names as the class's, and that didn't make
+their resolution too easy.  (conversion artifact, move along)
+
+"this": I was lacking an environment creation in funcalls since two
+chapters, but didn't specifically notice until here where it was out
+of sync with the resolver.  Debugging that then was a hell of a pain.
+
+*** Inheritance
+
+For most of this chapter, invoking anything on "super" did not get me
+a JVM exception of any kind.  Or do anything useful, FTM.  Just NOPs.
+It cleared up in the end, so I didn't really need to investiate it,
+but that the case in jlox as well?  That would go against the mention
+that "the JVM will throw an exception and bring our interpreter to its
+knees", somewhere in the chapter.
+
+Memory's fuzzy, I think I also had a conversion artifact bug of
+resolving the superclass as the class, so all the "super" madness I
+encountered may be intertwined.  Take with a grain of salt.
+
+** Bugs I didn't notice until the regression
+
+First regression run: 175 tests passed. 63 tests failed.
+
+- Typos and assimilated
+  - Report errors to STDERR instead of STDOUT: 46 down.
+  - Typo in plus typing error message: 6 down.
+  - Typo in unterminated string scanning error message: 1 down.
+  - Adjust "too many parameters/arguments" error reporting: 4 down.
+    (I reported on the 254th comma instead of the 255th argument, so
+    I'd say correct in spirit but lousier error message)
+- Test framework
+  - Make interpreter language 'java': 1 down (unexpected_character).
+- Real fixes
+  - More javaesque floating-point output: 1 down.
+  - LoxCallable equality [with Unique]: 2 down.
+  - (conversion artifact) Resolve isInitializer on the method name
+    instead of the class's: 2 down.
+
+* Suggestions
+
+- do we need the real globals? (hadError, hadRuntimeError)
+- specify equality in language design
+  - function equality? currently on object identity, can be misleading
+  - closure equality? currently identity. would make sense with same bindings
+  - class quality? currently on identity, probably ok
+  - instance equality? currently neither specified nor tested, but
+    happens to exist in jlox and could actually make sense.
+- this and super are reserved words.  Any language design reasoning
+  behind that?  (AFAICT most of the implementation could handle them
+  as identifiers, and would make reasonable sense as such)
+- super can't repeat. Language design reasoning?
+- superclass is a variable.  Mildly inconsistent: if deref is allowed,
+  why not funcalls?  Plus, lurking bug.
+- superclass == nil?
+- Lox shouldn't have to know about Eof
+- Globals: why both directly accessible and root of environment?
+- Interpreting unary operator can return null.
+- Parser's advance method
+- Interpreting binary operations can return null
+- Is the logical handling sound?
+- Is equality on callables necessary? there?
+
+* Todo
+
+- investigate nulls (parser and interpreter)
+
